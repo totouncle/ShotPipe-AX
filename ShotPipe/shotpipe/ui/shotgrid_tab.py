@@ -9,7 +9,7 @@ from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QLineEdit, QTableWidget, QTableWidgetItem, QHeaderView,
     QFileDialog, QProgressBar, QComboBox, QGroupBox,
-    QMessageBox, QDialog, QFormLayout
+    QMessageBox, QDialog, QFormLayout, QCheckBox
 )
 from PyQt5.QtCore import Qt, pyqtSignal, QThread, pyqtSlot
 from PyQt5.QtGui import QColor
@@ -29,12 +29,13 @@ class UploadThread(QThread):
     upload_complete = pyqtSignal(object)
     error_occurred = pyqtSignal(str)
     
-    def __init__(self, file_infos, project_name):
+    def __init__(self, file_infos, project_name, history_manager):
         """Initialize the upload thread."""
         super().__init__()
         self.file_infos = file_infos
         self.project_name = project_name
         self.uploader = Uploader()
+        self.history_manager = history_manager
         
     def run(self):
         """Run the thread."""
@@ -142,20 +143,57 @@ class ShotgridTab(QWidget):
         
         # Create table widget for displaying files
         self.files_table = QTableWidget()
-        self.files_table.setColumnCount(6)
-        self.files_table.setHorizontalHeaderLabels(["파일명", "시퀀스", "샷", "태스크", "버전", "상태"])
-        self.files_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.files_table.setColumnCount(7)  # 컬럼 수 7개로 변경
+        self.files_table.setHorizontalHeaderLabels(["", "파일명", "시퀀스", "샷", "태스크", "버전", "상태"]) # 첫 번째 컬럼 추가
+        self.files_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents) # 체크박스 컬럼
+        self.files_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch) # 파일명 컬럼
+        self.files_table.setSelectionBehavior(QTableWidget.SelectRows)
         
+        # Add header checkbox for select/deselect all
+        self.header_checkbox = QCheckBox()
+        self.header_checkbox.stateChanged.connect(self.toggle_all_rows)
+        self.files_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Fixed)
+        self.files_table.horizontalHeader().resizeSection(0, 30) # 체크박스 컬럼 폭 고정
+        self.files_table.horizontalHeader().setStyleSheet("QHeaderView::section:horizontal#0 { padding-left: 10px; }")
+        # Place checkbox in header
+        header = self.files_table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.Fixed)
+        header.setMinimumSectionSize(30)
+        header.setMaximumSectionSize(30)
+        # Header에 checkbox를 직접 추가하는 것은 표준적이지 않음. 대신 QHeaderView를 서브클래싱하거나
+        # 별도 레이아웃을 사용해야 함. 여기서는 간단하게 기능 구현.
+
+        # 파일 타입 필터 버튼 추가
+        filter_layout = QHBoxLayout()
+        filter_label = QLabel("선택 필터:")
+        self.filter_all_btn = QPushButton("모두")
+        self.filter_image_btn = QPushButton("이미지")
+        self.filter_video_btn = QPushButton("비디오")
+        
+        self.filter_all_btn.clicked.connect(lambda: self.filter_rows("all"))
+        self.filter_image_btn.clicked.connect(lambda: self.filter_rows("image"))
+        self.filter_video_btn.clicked.connect(lambda: self.filter_rows("video"))
+        
+        filter_layout.addWidget(filter_label)
+        filter_layout.addWidget(self.filter_all_btn)
+        filter_layout.addWidget(self.filter_image_btn)
+        filter_layout.addWidget(self.filter_video_btn)
+        filter_layout.addStretch()
+
         # Add widgets to layout
         layout.addWidget(connection_group)
         layout.addWidget(project_group)
         layout.addWidget(file_load_group)
         layout.addLayout(upload_layout)
+        layout.addLayout(filter_layout) # 필터 레이아웃 추가
         layout.addWidget(self.progress_bar)
         layout.addWidget(self.files_table)
         
         # Initialize connection status
         self.update_connection_status()
+        
+        # Add History Manager instance
+        self.history_manager = UploadHistoryManager()
         
     def update_connection_status(self):
         """Update the connection status label."""
@@ -343,8 +381,14 @@ class ShotgridTab(QWidget):
             
             # Populate the table
             self.files_table.setRowCount(len(self.processed_files))
+            uploaded_count = 0
             for row, file_info in enumerate(self.processed_files):
                 try:
+                    # Create checkbox item for selection
+                    checkbox_widget = QCheckBox()
+                    checkbox_widget.setChecked(True) # 기본적으로 선택된 상태
+                    self.files_table.setCellWidget(row, 0, checkbox_widget)
+                    
                     # 처리된 파일 경로에서 파일명 가져오기 (우선순위 변경)
                     if file_info.get("processed_path"):
                         file_name = os.path.basename(file_info.get("processed_path"))
@@ -357,33 +401,53 @@ class ShotgridTab(QWidget):
                         file_name = "Unknown"
                     
                     file_name_item = QTableWidgetItem(file_name)
-                    self.files_table.setItem(row, 0, file_name_item)
+                    self.files_table.setItem(row, 1, file_name_item)
                     
                     # Sequence
                     sequence_item = QTableWidgetItem(str(file_info.get("sequence", "")))
-                    self.files_table.setItem(row, 1, sequence_item)
+                    self.files_table.setItem(row, 2, sequence_item)
                     
                     # Shot
                     shot_item = QTableWidgetItem(str(file_info.get("shot", "")))
-                    self.files_table.setItem(row, 2, shot_item)
+                    self.files_table.setItem(row, 3, shot_item)
                     
                     # Task
                     task_item = QTableWidgetItem(str(file_info.get("task", "")))
-                    self.files_table.setItem(row, 3, task_item)
+                    self.files_table.setItem(row, 4, task_item)
                     
                     # Version
                     version_item = QTableWidgetItem(str(file_info.get("version", "")))
-                    self.files_table.setItem(row, 4, version_item)
+                    self.files_table.setItem(row, 5, version_item)
                     
-                    # Status
-                    status_item = QTableWidgetItem("대기")
-                    self.files_table.setItem(row, 5, status_item)
+                    # Check upload status
+                    is_uploaded = self.history_manager.is_file_uploaded(file_info)
+                    status_text = "대기"
+                    status_color = QColor(255, 255, 255) # Default white
+                    if is_uploaded:
+                        status_text = "이미 업로드됨"
+                        status_color = QColor(200, 200, 200) # Gray
+                        checkbox_widget.setChecked(False) # 중복 파일은 기본적으로 해제
+                        uploaded_count += 1
+                        
+                    status_item = QTableWidgetItem(status_text)
+                    status_item.setBackground(status_color)
+                    self.files_table.setItem(row, 6, status_item)
+                    
+                    # Set items as non-editable
+                    for col in range(1, 7):
+                        item = self.files_table.item(row, col)
+                        if item:
+                            item.setFlags(item.flags() & ~Qt.ItemIsEditable)
+                            
                 except Exception as e:
                     logger.error(f"Error adding row {row} to table: {e}")
                 
             # Enable the upload button
             self.upload_button.setEnabled(True)
             logger.info("Files table updated successfully")
+            if uploaded_count > 0:
+                QMessageBox.information(self, "중복 파일 감지", f"{uploaded_count}개의 파일이 이미 업로드된 것으로 감지되었습니다. 해당 파일은 기본적으로 선택 해제됩니다.")
+                
         except Exception as e:
             logger.error(f"Error updating files table: {e}", exc_info=True)
         
@@ -399,15 +463,33 @@ class ShotgridTab(QWidget):
             QMessageBox.warning(self, "경고", "업로드할 파일이 없습니다.")
             return
             
+        # Get selected files from table
+        selected_files = []
+        for i in range(self.files_table.rowCount()):
+            checkbox_widget = self.files_table.cellWidget(i, 0)
+            status_item = self.files_table.item(i, 6) # 상태 컬럼
+            
+            is_checked = checkbox_widget and checkbox_widget.checkState() == Qt.Checked
+            is_already_uploaded = status_item and status_item.text() == "이미 업로드됨"
+            
+            if is_checked and not is_already_uploaded:
+                # Ensure the file index is within bounds
+                if i < len(self.processed_files):
+                    selected_files.append(self.processed_files[i])
+                else:
+                    logger.warning(f"Row index {i} out of bounds for processed_files list")
+            
+        if not selected_files:
+            QMessageBox.warning(self, "경고", "업로드할 파일이 선택되지 않았습니다.")
+            return
+            
         # 하드코딩된 프로젝트 이름 사용
         project_name = "AXRD-296"
             
         # Confirm upload
-        message = f"{len(self.processed_files)}개 파일을 프로젝트 '{project_name}'에 업로드하시겠습니까?"
+        message = f"{len(selected_files)}개 파일을 프로젝트 '{project_name}'에 업로드하시겠습니까?"
         if QMessageBox.question(self, "업로드 확인", message) != QMessageBox.Yes:
             return
-            
-        # 시퀀스 설정은 파일 처리 단계에서 적용됨
             
         # Show progress bar
         self.progress_bar.setVisible(True)
@@ -417,8 +499,7 @@ class ShotgridTab(QWidget):
         self.upload_button.setEnabled(False)
         
         # Create and start upload thread
-        # 업로더는 하드코딩된 프로젝트를 사용하므로 어떤 값이든 전달해도 무방함
-        self.upload_thread = UploadThread(self.processed_files, project_name)
+        self.upload_thread = UploadThread(selected_files, project_name, self.history_manager) # History manager 전달
         self.upload_thread.progress_updated.connect(self.update_progress)
         self.upload_thread.upload_complete.connect(self.upload_complete)
         self.upload_thread.error_occurred.connect(self.upload_error)
@@ -430,16 +511,38 @@ class ShotgridTab(QWidget):
         if total > 0:
             self.progress_bar.setValue(int(current * 100 / total))
             
+            # Find the corresponding row for the processed item
+            processed_file_info = result.get("file_info")
+            row = -1
+            if processed_file_info:
+                processed_path = processed_file_info.get("processed_path")
+                for i in range(self.files_table.rowCount()):
+                    # Find row by matching processed path
+                    try:
+                        # 테이블에서 파일명 가져오기 (컬럼 인덱스 확인 필요 - 현재 1)
+                        filename_item = self.files_table.item(i, 1)
+                        if filename_item and os.path.basename(processed_path) == filename_item.text():
+                            row = i
+                            break
+                    except Exception as e:
+                        logger.error(f"Error finding row for progress update: {e}")
+            
             # Update status in table for current item
-            row = current - 1  # Adjust for 0-based indexing
-            if row >= 0 and row < self.files_table.rowCount():
+            if row >= 0:
                 success = result.get("success", False)
                 status_text = "성공" if success else "실패"
                 status_color = QColor(0, 255, 0) if success else QColor(255, 0, 0)  # Green or Red
                 
                 status_item = QTableWidgetItem(status_text)
                 status_item.setBackground(status_color)
-                self.files_table.setItem(row, 5, status_item)
+                self.files_table.setItem(row, 6, status_item)
+                
+                # 성공 시 체크박스 해제
+                if success:
+                    checkbox_widget = self.files_table.cellWidget(row, 0)
+                    if checkbox_widget:
+                        checkbox_widget.setChecked(False)
+                        checkbox_widget.setEnabled(False) # 재선택 방지
                 
     @pyqtSlot(object)
     def upload_complete(self, results):
@@ -471,3 +574,33 @@ class ShotgridTab(QWidget):
         
         # Show error message
         QMessageBox.critical(self, "업로드 오류", f"파일 업로드 중 오류가 발생했습니다:\n{error_message}")
+
+    def toggle_all_rows(self, state):
+        """Select or deselect all rows based on header checkbox state."""
+        check_state = Qt.Checked if state == Qt.Checked else Qt.Unchecked
+        for i in range(self.files_table.rowCount()):
+            widget_item = self.files_table.cellWidget(i, 0)
+            if widget_item:
+                widget_item.setCheckState(check_state)
+                
+    def filter_rows(self, file_type):
+        """Filter table rows based on file type."""
+        for i in range(self.files_table.rowCount()):
+            task_item = self.files_table.item(i, 4) # Task column
+            if task_item:
+                task = task_item.text().lower()
+                is_image = task == "txttoimage"
+                is_video = task == "imgtovideo"
+                
+                should_show = False
+                if file_type == "all":
+                    should_show = True
+                elif file_type == "image" and is_image:
+                    should_show = True
+                elif file_type == "video" and is_video:
+                    should_show = True
+                    
+                self.files_table.setRowHidden(i, not should_show)
+            else:
+                # Task 정보가 없는 경우 일단 숨김
+                self.files_table.setRowHidden(i, True)
