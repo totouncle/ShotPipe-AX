@@ -13,9 +13,12 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import Qt, pyqtSignal, QThread, pyqtSlot
 from PyQt5.QtGui import QColor
-from ..shotgrid import ShotgridConnector, EntityManager, Uploader
+from ..shotgrid.api_connector import ShotgridConnector
+from ..shotgrid.entity_manager import EntityManager
+from ..shotgrid.uploader import Uploader
 from ..config import config
 from dotenv import load_dotenv
+from ..utils.history_manager import UploadHistoryManager
 
 # .env 파일 로드
 load_dotenv()
