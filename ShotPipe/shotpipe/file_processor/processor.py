@@ -16,6 +16,11 @@ from ..config import config
 from PyQt5.QtCore import QThread, pyqtSignal
 import traceback
 import re
+try:
+    from ..utils.processed_files_tracker import ProcessedFilesTracker
+except ImportError:
+    # 절대 경로로 시도
+    from shotpipe.utils.processed_files_tracker import ProcessedFilesTracker
 
 logger = logging.getLogger(__name__)
 
@@ -233,7 +238,7 @@ class ProcessingThread(QThread):
     processing_completed = pyqtSignal(list)  # List of processed file results
     processing_error = pyqtSignal(str)  # Error message
     
-    def __init__(self, file_paths, metadata_extractor, sequence_dict=None, selected_sequence=None, output_directory=None):
+    def __init__(self, file_paths, metadata_extractor, sequence_dict=None, selected_sequence=None, output_directory=None, processed_files_tracker=None):
         """
         Initialize the processing thread.
         
@@ -243,6 +248,7 @@ class ProcessingThread(QThread):
             sequence_dict (dict, optional): Dictionary mapping files to sequences. Defaults to None.
             selected_sequence (str, optional): Selected sequence name. Defaults to None.
             output_directory (str, optional): Output directory for processed files. Defaults to None.
+            processed_files_tracker (ProcessedFilesTracker, optional): Tracker for processed files. Defaults to None.
         """
         super().__init__()
         self.file_paths = file_paths
@@ -253,6 +259,7 @@ class ProcessingThread(QThread):
         self.cancel = False
         self.processed_files = []
         self.naming_manager = NamingManager()  # NamingManager 인스턴스 추가
+        self.processed_files_tracker = processed_files_tracker  # 처리된 파일 추적기 추가
         
         logger.info(f"Processing thread initialized with {len(file_paths)} files")
         if output_directory:
@@ -285,7 +292,7 @@ class ProcessingThread(QThread):
                     logger.info(f"Processing file: {file_name}")
                     
                     # Determine sequence and shot for this file
-                    sequence, shot = self._determine_sequence_and_shot(file_name)
+                    sequence, shot = self._determine_sequence_and_shot(file_name, file_path)
                     
                     # Update UI with "processing" status
                     self.file_processed.emit(file_name, "처리중", sequence or "", shot or "", "")
@@ -344,72 +351,61 @@ class ProcessingThread(QThread):
         """Process a single file.
         
         Args:
-            file_path (str): Path of the file to process
-            sequence (str, optional): Sequence name. Defaults to None.
-            shot (str, optional): Shot number. Defaults to None.
+            file_path (str): Path to the file
+            sequence (str, optional): Sequence identifier. Defaults to None.
+            shot (str, optional): Shot identifier. Defaults to None.
             
         Returns:
-            dict: Processing result
+            dict: Processing results dictionary
         """
         try:
             file_name = os.path.basename(file_path)
-            logger.info(f"Processing file: {file_path}")
+            logger.info(f"\n===== 파일 처리 시작: {file_name} =====")
             
-            # Initialize result dictionary
+            # Initialize the result dictionary
             result = {
                 "file_name": file_name,
                 "file_path": file_path,
                 "success": False,
                 "message": "",
                 "sequence": sequence or "",
-                "shot": shot or "",
-                "metadata": {},
-                "output_path": file_path,  # Default to original path
-                "metadata_path": "",  # 메타데이터 파일 경로
-                "task": "comp"  # 기본 작업 유형 추가
+                "shot": shot or ""
             }
             
-            # Check if file exists
-            if not os.path.exists(file_path):
-                logger.error(f"File not found: {file_path}")
-                result["message"] = "파일을 찾을 수 없습니다"
+            # 처리된 파일 인지 확인
+            if self.processed_files_tracker and self.processed_files_tracker.is_file_processed(file_path):
+                logger.info(f"건너뛰기: 이미 처리된 파일 ({file_name})")
+                result["success"] = False
+                result["message"] = "이미 처리된 파일"
+                logger.info(f"===== 파일 처리 완료(이미 처리됨): {file_name} =====\n")
                 return result
             
-            # Extract metadata from the file using the MetadataExtractor instance
+            # Determine if this is a reprocessing of an existing file
+            is_reprocessing = False
+            
+            # Check if the file path or name indicates previous processing
+            for pattern in ["_v[0-9]{4}", "/processed/", "_processed_"]:
+                if re.search(pattern, file_path):
+                    is_reprocessing = True
+                    logger.info(f"Reprocessing detected for {file_name}")
+                    break
+                    
+            # If sequence and shot are not provided, determine from file name or path
+            if not sequence or not shot:
+                sequence, shot = self._determine_sequence_and_shot(file_name, file_path)
+                result["sequence"] = sequence
+                result["shot"] = shot
+                
             try:
-                # Make sure we have a valid MetadataExtractor instance
-                if not hasattr(self, 'metadata_extractor') or self.metadata_extractor is None:
-                    logger.error("Missing metadata_extractor instance")
-                    # Create a new instance as fallback
-                    from .metadata import MetadataExtractor
-                    self.metadata_extractor = MetadataExtractor()
-                
-                # Check if the method exists
-                if not hasattr(self.metadata_extractor, 'extract_metadata'):
-                    logger.error("Invalid metadata_extractor object (missing extract_metadata method)")
-                    # Try to create a basic metadata dictionary
-                    metadata = {
-                        "file_path": file_path,
-                        "file_name": file_name,
-                        "file_extension": os.path.splitext(file_path)[1].lower(),
-                        "file_size": os.path.getsize(file_path),
-                        "error": "메타데이터 추출기 초기화 실패"
-                    }
-                else:
-                    # Extract metadata using the extractor
-                    metadata = self.metadata_extractor.extract_metadata(file_path)
-                
-                # Ensure metadata is a dictionary, even if extraction returns None
-                if metadata is None:
-                    metadata = {}
-                    logger.warning(f"No metadata extracted for {file_name}, using empty dictionary")
-                
+                # Extract metadata
+                metadata = self.metadata_extractor.extract_metadata(file_path)
                 result["metadata"] = metadata
                 
-                # Add sequence and shot information to metadata
+                # Add sequence and shot to metadata
                 if sequence:
                     metadata["sequence"] = sequence
                     result["sequence"] = sequence
+                
                 if shot:
                     metadata["shot"] = shot
                     result["shot"] = shot
@@ -447,67 +443,95 @@ class ProcessingThread(QThread):
                 result["task"] = renamed_info["task"]
                 result["version"] = renamed_info["version"]
                 
-                # Determine output path
+                # Add a message about version if this is a reprocessed file
+                if is_reprocessing:
+                    msg = f"다시 처리됨: 버전 {renamed_info['version']}"
+                    result["message"] += msg
+                    logger.info(msg)
+                
+                # 출력 디렉토리 확인 및 생성
                 if self.output_directory:
-                    # 네이밍 매니저에서 설정한 processed_path 사용
-                    output_path = renamed_info["processed_path"]
-                    result["output_path"] = output_path
+                    # 출력 디렉토리가 존재하는지 확인하고 생성
+                    os.makedirs(self.output_directory, exist_ok=True)
                     
-                    # 출력 디렉토리 생성
-                    output_dir = os.path.dirname(output_path)
-                    os.makedirs(output_dir, exist_ok=True)
+                    # 파일 처리 경로 설정
+                    result["output_path"] = renamed_info["processed_path"]
                     
-                    # Copy file to output directory with the new name
-                    try:
-                        shutil.copy2(file_path, output_path)
-                        logger.info(f"Copied and renamed file to: {output_path}")
-                        
-                        # 리네이밍된 결과 로그 출력 (원본 경로 -> 대상 경로)
-                        relative_src = os.path.relpath(file_path)
-                        relative_dst = os.path.relpath(output_path)
-                        logger.info(f"파일 리네이밍: {relative_src} -> {relative_dst}")
-                    except Exception as copy_err:
-                        logger.error(f"Error copying file to output directory: {copy_err}")
-                        result["message"] += f"파일 복사 실패: {str(copy_err)}. "
-                    
-                    # Use output path for metadata
-                    metadata_path = f"{os.path.splitext(output_path)[0]}.metadata.json"
+                    # 메타데이터 경로 설정 (배치 폴더에 저장될 메타데이터 경로는 나중에 결정)
+                    metadata_path = f"{os.path.splitext(renamed_info['processed_path'])[0]}.metadata.json"
                 else:
-                    # Keep file in original location
-                    output_dir = os.path.dirname(file_path)
-                    os.makedirs(output_dir, exist_ok=True)
+                    # 출력 디렉토리가 없으면 원본 경로 사용
+                    result["output_path"] = file_path
                     
-                    # Use original path for metadata
+                    # 메타데이터 경로 설정
                     metadata_path = f"{os.path.splitext(file_path)[0]}.metadata.json"
                 
                 result["metadata_path"] = metadata_path  # 메타데이터 경로 저장
                 
-                # Check if save_metadata method exists
-                if not hasattr(self.metadata_extractor, 'save_metadata'):
-                    logger.error("Invalid metadata_extractor object (missing save_metadata method)")
-                    # Try to save metadata directly
+                # 배치 폴더 처리: NamingManager로 생성된 파일명을 사용하되, 파일은 배치 폴더에만 저장
+                if self.processed_files_tracker and self.output_directory:
                     try:
-                        with open(metadata_path, 'w', encoding='utf-8') as f:
-                            json.dump(metadata, f, indent=4, ensure_ascii=False)
-                        result["success"] = True
-                        result["message"] = "메타데이터 직접 저장됨"
-                        logger.info(f"Metadata directly saved to {metadata_path}")
-                    except Exception as e:
-                        logger.error(f"Failed to directly save metadata: {e}")
-                        result["message"] = f"메타데이터 저장 실패: {str(e)}"
-                        # Still mark as successful if we got this far
-                        result["success"] = True
-                else:
-                    # Save using the extractor method
-                    if self.metadata_extractor.save_metadata(metadata, metadata_path):
-                        logger.info(f"Metadata saved to {metadata_path}")
-                        result["success"] = True
-                        result["message"] = "처리 완료"
-                    else:
-                        logger.error(f"Failed to save metadata to {metadata_path}")
-                        result["message"] = "메타데이터 저장 실패"
-                        # Still mark as successful if we got this far
-                        result["success"] = True
+                        logger.info(f"\n----- 배치 폴더 처리 시작 -----")
+                        logger.info(f"배치 폴더 이동 준비 중: {file_name}")
+                        
+                        # 처리된 파일명 명시적으로 확인 및 로깅
+                        processed_filename = renamed_info.get("processed_filename", "")
+                        logger.info(f"처리될 파일명: {processed_filename}")
+                        
+                        # processed_info에 processed_filename 포함하여 전달
+                        processed_info = {
+                            "processed_path": result["output_path"],
+                            "processed_filename": processed_filename  # 리네이밍된 파일명 명시적 전달
+                        }
+                        
+                        # 배치 폴더로 이동
+                        batch_path = self.processed_files_tracker.move_to_batch_folder(
+                            file_path, 
+                            processed_info,
+                            self.output_directory
+                        )
+                        
+                        if batch_path:
+                            # 이동된 파일 경로 설정
+                            result["batch_path"] = batch_path
+                            # Shotgrid가 참조하는 output_path도 배치 경로로 업데이트
+                            result["output_path"] = batch_path
+                            logger.info(f"배치 경로 설정 및 output_path 업데이트: {batch_path}")
+                            
+                            # 배치 폴더에 메타데이터 저장
+                            batch_metadata_path = f"{os.path.splitext(batch_path)[0]}.metadata.json"
+                            try:
+                                with open(batch_metadata_path, 'w', encoding='utf-8') as f:
+                                    json.dump(metadata, f, indent=4, default=str)
+                                logger.info(f"배치 폴더에 메타데이터 저장됨: {batch_metadata_path}")
+                                result["metadata_path"] = batch_metadata_path
+                            except Exception as meta_err:
+                                logger.error(f"배치 폴더에 메타데이터 저장 오류: {meta_err}")
+                            
+                            # 처리된 파일 정보 추가
+                            logger.info(f"처리된 파일 정보 기록 중...")
+                            self.processed_files_tracker.add_processed_file(
+                                result, 
+                                batch_path,  # 배치 폴더 경로를 output_path로 사용
+                                success=True,
+                                status_message=result.get("message", "")
+                            )
+                            logger.info(f"처리된 파일 정보 기록 완료")
+                            
+                            logger.info(f"파일이 배치 폴더로 성공적으로 이동됨: {batch_path}")
+                        else:
+                            logger.warning(f"배치 폴더로 이동 실패: {file_name}")
+                        
+                        logger.info(f"----- 배치 폴더 처리 완료 -----")
+                    except Exception as batch_err:
+                        logger.error(f"배치 폴더 처리 오류: {batch_err}")
+                        result["message"] += f"배치 처리 실패: {str(batch_err)}. "
+                
+                # 성공적으로 처리됨
+                result["success"] = True
+                result["message"] = "처리 완료"
+                logger.info(f"===== 파일 처리 완료: {file_name} =====\n")
+                return result
                 
             except Exception as e:
                 error_trace = traceback.format_exc()
@@ -545,76 +569,74 @@ class ProcessingThread(QThread):
                 "metadata_path": ""
             }
     
-    def _determine_sequence_and_shot(self, file_name):
-        """Determine sequence and shot for a file.
+    def _determine_sequence_and_shot(self, file_name, file_path=None):
+        """파일 이름에서 시퀀스와 샷 번호를 결정합니다.
         
         Args:
-            file_name (str): Name of the file
+            file_name (str): 파일 이름
+            file_path (str, optional): 파일 전체 경로. Defaults to None.
             
         Returns:
             tuple: (sequence, shot)
         """
-        # If we have a selected sequence and it exists in the dictionary
-        if self.selected_sequence and self.selected_sequence in self.sequence_dict:
-            # Try to find the file in this sequence
-            for seq_file, seq_shot in self.sequence_dict[self.selected_sequence]:
-                if seq_file == file_name:
-                    return self.selected_sequence, seq_shot
+        # 로깅 추가
+        logger.debug(f"시퀀스 결정 시작: {file_name}, selected_sequence: {self.selected_sequence}")
         
-        # If we have sequence dictionary, try to find the file in any sequence
+        # 선택된 시퀀스가 있고 '자동 감지'가 아니면 사용
+        if self.selected_sequence and self.selected_sequence != "자동 감지":
+            logger.info(f"사용자가 선택한 시퀀스 사용: {self.selected_sequence}")
+            return self.selected_sequence, "c001"
+        
+        # 파일 경로에서 디렉토리 이름 추출 (파일 경로가 있는 경우)
+        if file_path:
+            # 파일이 있는 디렉토리 이름 추출
+            dir_name = os.path.basename(os.path.dirname(file_path))
+            if dir_name:
+                logger.info(f"디렉토리 이름을 시퀀스로 사용: {dir_name}")
+                return dir_name, "c001"
+        
+        # 1. 파일 이름에서 시퀀스 및 샷 추출 시도
+        for pattern, extractor in [
+            # 패턴: s01_c001_name.ext
+            (r'^([sS]\d+)_[cC](\d+)_', lambda m: (m.group(1).upper(), f"c{int(m.group(2)):03d}")),
+            
+            # 패턴: seq_shot.ext (예: A_001.jpg)
+            (r'^([A-Za-z]+)_(\d+)\.', lambda m: (m.group(1).upper(), f"c{int(m.group(2)):03d}")),
+            
+            # 패턴: seq.shot.ext (예: A.001.jpg)
+            (r'^([A-Za-z]+)\.(\d+)\.', lambda m: (m.group(1).upper(), f"c{int(m.group(2)):03d}")),
+            
+            # 패턴: name_s01_c001.ext
+            (r'_([sS]\d+)_[cC](\d+)', lambda m: (m.group(1).upper(), f"c{int(m.group(2)):03d}")),
+            
+            # 패턴: LIG_c001_name.ext 또는 KIAP_c001_name.ext
+            (r'^(LIG|KIAP)_[cC](\d+)', lambda m: (m.group(1).upper(), f"c{int(m.group(2)):03d}")),
+        ]:
+            match = re.search(pattern, file_name)
+            if match:
+                seq, shot = extractor(match)
+                logger.debug(f"파일 이름에서 시퀀스/샷 추출: {seq}/{shot}")
+                return seq, shot
+        
+        # 3. 시퀀스 사전에서 정보 찾기
         if self.sequence_dict:
             for seq_name, files in self.sequence_dict.items():
                 for seq_file, seq_shot in files:
                     if seq_file == file_name:
+                        logger.debug(f"시퀀스 사전에서 정보 찾음: {seq_name}/{seq_shot}")
                         return seq_name, seq_shot
         
-        # If we couldn't find sequence info, try to extract it from the file name
-        sequence = ""
-        sequence_match = re.search(r'([sS][0-9]+)', file_name)
-        if sequence_match:
-            sequence = sequence_match.group(1).upper()
-        else:
-            # Try other common sequence patterns
-            seq_patterns = [
-                r'(seq[0-9]+)',  # seq01
-                r'(sequence[0-9]+)',  # sequence01
-                r'(sq[0-9]+)',   # sq01
-                r'_(s[0-9]+)_',   # _s01_
-                r'(MP[0-9])',    # MP4
-                r'(U[0-9]+)'     # U7166812697
-            ]
-            
-            for pattern in seq_patterns:
-                match = re.search(pattern, file_name, re.IGNORECASE)
-                if match:
-                    sequence = match.group(1).upper()
-                    break
-            
-        shot_number = self._extract_shot_number(file_name)
-        if shot_number:
-            # Format is already handled in _extract_shot_number
-            return sequence, shot_number
-        
-        # 파일 내용에 LIG, KIAP이 포함되어 있는지 확인
-        if "LIG" in file_name:
+        # 4. 파일 이름에서 LIG 또는 KIAP 문자열 추출
+        if "LIG" in file_name.upper():
+            logger.debug("파일 이름에서 LIG 추출")
             return "LIG", "c001"
-        elif "KIAP" in file_name:
+        elif "KIAP" in file_name.upper():
+            logger.debug("파일 이름에서 KIAP 추출")
             return "KIAP", "c001"
-                
-        # PRD에 따라 특별히 처리해야 하는 파일명 패턴
-        # 파일 이름이 IMG로 시작하는 경우 기본 시퀀스와 샷 할당
-        if file_name.startswith("IMG"):
-            return "LIG", "c001"  # PRD 요구사항에 따라 LIG 프로젝트로 설정
             
-        # 파일 경로와 확장자에서 기본 시퀀스 유추
-        ext = os.path.splitext(file_name)[1].lower()
-        if ext in ['.mp4', '.mov', '.avi']:
-            return "LIG", "c001"  # 영상 파일은 LIG 프로젝트로 기본 설정
-        elif ext in ['.jpg', '.jpeg', '.png', '.tif', '.tiff']:
-            return "LIG", "c001"  # 이미지 파일은 LIG 프로젝트로 기본 설정
-            
-        # If all else fails, return default sequence and shot
-        return "LIG", "c001"  # 기본값도 LIG 프로젝트로 설정
+        # 5. 최종 기본값 사용
+        logger.info("기본 시퀀스 's01' 사용")
+        return "s01", "c001"
     
     def _extract_shot_number(self, file_name):
         """Extract shot number from file name.

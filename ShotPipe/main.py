@@ -14,6 +14,11 @@ import logging
 from pathlib import Path
 import subprocess
 from datetime import datetime
+import argparse
+from dotenv import load_dotenv
+from PyQt5.QtWidgets import QApplication
+from shotpipe.ui.main_window import MainWindow
+from shotpipe.utils.processed_files_tracker import ProcessedFilesTracker
 
 # Set up logging before any other imports
 def setup_logging():
@@ -122,35 +127,46 @@ def check_dependencies():
         logger.warning("Shotgun API not found. Shotgrid integration will be disabled.")
 
 def main():
-    """Main function to start the application."""
-    # Set up logging
-    logger = setup_logging()
-    
+    """Run the main application."""
     try:
-        # Check dependencies
-        logger.info("Checking dependencies...")
-        check_dependencies()
+        # 로거 설정
+        logger = logging.getLogger(__name__)
         
-        # Add parent directory to path for imports
-        parent_dir = str(Path(__file__).parent)
-        if parent_dir not in sys.path:
-            sys.path.insert(0, parent_dir)
+        parser = argparse.ArgumentParser(description='ShotPipe application')
+        parser.add_argument('--reset-history', action='store_true', help='Reset processed files history')
+        args = parser.parse_args()
         
-        # Import after logging is set up
-        from shotpipe.ui.main_window import MainWindow
+        # 이력 초기화가 요청된 경우
+        if args.reset_history:
+            try:
+                history_file = os.path.join(os.path.expanduser("~/.shotpipe"), "processed_files.json")
+                if os.path.exists(history_file):
+                    os.remove(history_file)
+                    logger.info(f"처리된 파일 이력이 초기화되었습니다: {history_file}")
+                else:
+                    logger.info("처리된 파일 이력 파일이 존재하지 않습니다.")
+            except Exception as e:
+                logger.error(f"이력 초기화 중 오류 발생: {e}")
         
-        logger.info("Starting ShotPipe application...")
-        MainWindow.run()
+        # 처리된 파일 추적기 초기화 및 상태 확인
+        try:
+            tracker = ProcessedFilesTracker()
+            processed_count = len(tracker.history.get("processed_files", {}))
+            current_batch = tracker.history.get("batch_info", {}).get("current_batch", "batch01")
+            last_batch = tracker.history.get("batch_info", {}).get("last_batch", 0)
+            logger.info(f"처리된 파일 추적기 초기화: {processed_count}개 파일, 현재 배치: {current_batch}, 마지막 배치 번호: {last_batch}")
+        except Exception as e:
+            logger.error(f"처리된 파일 추적기 초기화 중 오류 발생: {e}")
         
-    except ImportError as e:
-        logger.critical(f"Failed to import required module: {e}")
-        print(f"Critical error: Failed to import required module: {e}", file=sys.stderr)
-        print(f"Python path: {sys.path}", file=sys.stderr)
-        sys.exit(1)
+        app = QApplication(sys.argv)
+        window = MainWindow()
+        window.show()
+        logger.info("Application started")
+        return app.exec_()
+        
     except Exception as e:
-        logger.critical(f"Failed to start application: {e}")
-        print(f"Critical error: {e}", file=sys.stderr)
-        sys.exit(1)
+        logger.critical(f"Fatal error in main: {e}", exc_info=True)
+        return 1
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

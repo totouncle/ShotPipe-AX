@@ -28,9 +28,9 @@ class NamingManager:
             dict: Updated file information with new path and naming information
         """
         # Extract needed information
-        sequence = file_info.get("sequence") or "LIG"  # Default sequence
+        sequence = file_info.get("sequence") or "s01"  # 기본 시퀀스를 s01로 변경
         
-        # PRD 요구사항: 시퀀스는 's01', 's02' 형식으로 표현
+        # 시퀀스 이름 정규화
         sequence = self._normalize_sequence(sequence)
         
         shot = file_info.get("shot") or "c001"  # Default shot
@@ -64,15 +64,42 @@ class NamingManager:
         if task == "comp" or task == "unknown":
             task = default_task
         
-        # 출력 디렉토리 결정
+        # 출력 디렉토리 결정 - 배치 기반 구조만 사용하도록 수정
         if output_dir:
-            target_dir = os.path.join(output_dir, sequence, shot)
-            os.makedirs(target_dir, exist_ok=True)
+            # 시퀀스/샷 폴더 생성하지 않고 output_dir 자체를 target_dir로 사용
+            target_dir = output_dir
         else:
             target_dir = original_path.parent
-            
+        
+        # Check if this file is being reprocessed by examining the original filename
+        is_reprocessing = False
+        current_version = "v0000"  # Default version start
+        
+        # If file_info has a processed_path from a previous processing, extract that info
+        if "processed_path" in file_info and file_info["processed_path"]:
+            prev_processed_filename = os.path.basename(file_info["processed_path"])
+            prev_info = self.parse_filename(prev_processed_filename)
+            if prev_info:
+                is_reprocessing = True
+                current_version = prev_info["version"]
+                logger.info(f"Reprocessing detected. Previous version: {current_version}")
+        
+        # Also check if the original filename follows our naming pattern
+        orig_info = self.parse_filename(original_path.name)
+        if orig_info and not is_reprocessing:
+            is_reprocessing = True
+            current_version = orig_info["version"]
+            logger.info(f"Reprocessing a previously named file. Previous version: {current_version}")
+        
         # 다음 버전 번호 가져오기
-        version = self.get_next_version(target_dir, sequence, shot, task)
+        if is_reprocessing:
+            # Calculate next version based on the current version
+            version_num = int(current_version[1:])  # Extract number part
+            version = f"v{version_num + 1:04d}"  # Increment version
+            logger.info(f"Incrementing version for reprocessed file: {current_version} -> {version}")
+        else:
+            # Get next version from disk
+            version = self.get_next_version(target_dir, sequence, shot, task)
         
         # 네이밍 규칙에 따라 새 파일명 생성: [시퀀스]_c001_[task]_v0001
         base_filename = f"{sequence}_{shot}_{task}_{version}"
@@ -82,12 +109,24 @@ class NamingManager:
         output_path = Path(target_dir) / new_filename
             
         # 출력 파일이 이미 존재하고 원본과 다른 경우 버전 증가
+        # This adds an extra safety check for collision
         if output_path.exists() and str(output_path.absolute()) != str(original_path.absolute()):
-            version = self.get_next_version(target_dir, sequence, shot, task)
+            # Get version from existing file
+            existing_info = self.parse_filename(output_path.name)
+            if existing_info:
+                existing_version = existing_info["version"]
+                version_num = int(existing_version[1:])
+                version = f"v{version_num + 1:04d}"
+                logger.info(f"Found existing file with the same name. Incrementing version: {existing_version} -> {version}")
+            else:
+                # If parsing fails, use standard get_next_version
+                version = self.get_next_version(target_dir, sequence, shot, task)
+                
             new_filename = f"{sequence}_{shot}_{task}_{version}{original_path.suffix}"
             output_path = Path(target_dir) / new_filename
         
-        # 파일 정보 업데이트
+        # 파일 정보 업데이트 - processed_filename 필드 추가
+        file_info["processed_filename"] = new_filename  # 파일명만 별도로 저장
         file_info["processed_path"] = str(output_path.absolute())
         file_info["sequence"] = sequence
         file_info["shot"] = shot
@@ -99,44 +138,25 @@ class NamingManager:
     
     def _normalize_sequence(self, sequence):
         """
-        PRD 요구사항에 맞게 시퀀스 형식을 정규화합니다.
+        특정 시퀀스만 사용하도록 정규화합니다.
+        LIG와 KIAP를 우선적으로 사용하고, 사용자가 명시적으로 지정한 시퀀스만 허용합니다.
         
         Args:
             sequence (str): 원본 시퀀스 문자열
             
         Returns:
-            str: 정규화된 시퀀스 ('s01', 's02' 형식)
+            str: 정규화된 시퀀스
         """
         # 빈 시퀀스인 경우 기본값
         if not sequence:
-            return "s01"
+            return "LIG"  # 기본값을 LIG로 변경
         
-        # 이미 's' 또는 'S'로 시작하고 숫자가 있는 형식이면 표준화
-        s_pattern = re.match(r'^[sS](\d+)', sequence)
-        if s_pattern:
-            seq_num = int(s_pattern.group(1))
-            return f"s{seq_num:02d}"
-        
-        # 숫자만 있는 경우 's' 접두사 추가
-        if sequence.isdigit():
-            return f"s{int(sequence):02d}"
-        
-        # 'seq' 또는 'sequence' 형식
-        seq_pattern = re.match(r'^(?:seq|sequence)[_\s]*(\d+)', sequence.lower())
-        if seq_pattern:
-            seq_num = int(seq_pattern.group(1))
-            return f"s{seq_num:02d}"
+        # 특수 시퀀스 처리 - 대문자로 정규화
+        if sequence.upper() in ["LIG", "KIAP", "LIG_KIAP"]:
+            return sequence.upper()
             
-        # 특수 시퀀스 처리
-        if sequence.upper() == "LIG":
-            return "s01"
-        if sequence.upper() == "KIAP":
-            return "s02"
-        if sequence.upper() == "LIG_KIAP":
-            return "s03"
-        
-        # 다른 모든 경우 첫 문자를 01로 변환 (기본적으로 모든 시퀀스를 s01로 변환)
-        return "s01"
+        # 기타 시퀀스는 사용자가 지정한 그대로 사용
+        return sequence
     
     def parse_filename(self, filename):
         """

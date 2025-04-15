@@ -49,29 +49,45 @@ class Uploader:
         """
         # 하드코딩된 프로젝트 이름 사용
         project_name = "AXRD-296"
+        
+        # 로그 추가 - 업로드 시작
+        file_path = file_info.get("processed_path") or file_info.get("file_path")
+        file_name = os.path.basename(file_path) if file_path else "알 수 없는 파일"
+        logger.info(f"\n\n▶▶▶ Shotgrid 업로드 시작: {file_name} ▶▶▶")
+        logger.info(f"프로젝트: {project_name}")
+        
         if not self.connector.is_connected():
             error_msg = "Not connected to Shotgrid"
             logger.error(error_msg)
+            logger.error(f"▶▶▶ Shotgrid 업로드 실패: 연결 없음 ◀◀◀")
             return {"success": False, "error": error_msg}
             
         # Verify file exists
-        file_path = file_info.get("processed_path") or file_info.get("file_path")
         if not file_path or not os.path.exists(file_path):
             error_msg = f"File not found: {file_path}"
             logger.error(error_msg)
+            logger.error(f"▶▶▶ Shotgrid 업로드 실패: 파일 없음 ◀◀◀")
             return {"success": False, "error": error_msg}
-            
+        
+        # 파일 크기 로깅
+        file_size = os.path.getsize(file_path)
+        logger.info(f"파일 크기: {file_size} bytes ({file_size/1024/1024:.2f} MB)")
+        
         # Extract codes from file_info if not provided
         sequence_code = sequence_code or file_info.get("sequence")
         shot_code = shot_code or file_info.get("shot")
         task_name = task_name or file_info.get("task")
         
+        logger.info(f"시퀀스: {sequence_code}, 샷: {shot_code}, 태스크: {task_name}")
+        
         if not sequence_code or not shot_code or not task_name:
             error_msg = "Missing required sequence, shot, or task information"
             logger.error(error_msg)
+            logger.error(f"▶▶▶ Shotgrid 업로드 실패: 필수 정보 누락 ◀◀◀")
             return {"success": False, "error": error_msg}
             
         # Ensure entities exist
+        logger.info(f"Shotgrid 엔티티 확인 중...")
         project, sequence, shot, task = self.entity_manager.ensure_entities(
             project_name, sequence_code, shot_code, task_name, user_email, status
         )
@@ -79,21 +95,30 @@ class Uploader:
         if not project or not sequence or not shot or not task:
             error_msg = "Failed to ensure required entities exist"
             logger.error(error_msg)
+            logger.error(f"▶▶▶ Shotgrid 업로드 실패: 엔티티 확인 실패 ◀◀◀")
             return {"success": False, "error": error_msg}
-            
+        
+        logger.info(f"엔티티 확인 완료 - 프로젝트ID: {project['id']}, 시퀀스ID: {sequence['id']}, 샷ID: {shot['id']}, 태스크ID: {task['id']}")
+        
         # Create version entity
+        logger.info(f"Shotgrid 버전 생성 중...")
         version_data = self._create_version(project, shot, task, file_info)
         if not version_data.get("success"):
+            logger.error(f"▶▶▶ Shotgrid 업로드 실패: 버전 생성 실패 ◀◀◀")
             return version_data
-            
+        
         version = version_data["version"]
+        logger.info(f"버전 생성 완료 - 버전ID: {version['id']}")
         
         # Upload the file
+        logger.info(f"파일 업로드 중...")
         upload_data = self._upload_file_to_version(version, file_path)
         if not upload_data.get("success"):
+            logger.error(f"▶▶▶ Shotgrid 업로드 실패: 파일 업로드 실패 ◀◀◀")
             return upload_data
-            
-        logger.info(f"Successfully uploaded {Path(file_path).name} to Shotgrid")
+        
+        logger.info(f"파일 업로드 완료: {Path(file_path).name}")
+        logger.info(f"▶▶▶ Shotgrid 업로드 완료 ◀◀◀\n")
         
         # Return combined result
         return {
@@ -193,7 +218,8 @@ class Uploader:
             
             # 파일 타입에 상관없이 동일한 필드 사용
             field_name = "sg_uploaded_movie"
-            logger.info(f"Uploading {file_name} ({file_size} bytes) to Shotgrid as {field_name}")
+            logger.info(f"업로드 준비: {file_name} ({file_size} bytes, {file_size/1024/1024:.2f} MB)")
+            logger.info(f"대상 필드: {field_name}, 버전ID: {version['id']}")
             
             # 모든 미디어 타입에 대해 통합된 필드 목록 사용
             field_alternatives = [
@@ -217,7 +243,7 @@ class Uploader:
             for field in field_alternatives:
                 for attempt in range(self.max_retries):
                     try:
-                        logger.info(f"Attempt {attempt+1} uploading to field '{field}'")
+                        logger.info(f"업로드 시도 {attempt+1}/{self.max_retries} - 필드: '{field}'")
                         
                         # 기본 업로드 시도
                         sg.upload(
@@ -226,16 +252,16 @@ class Uploader:
                             file_path, 
                             field
                         )
-                        logger.info(f"Upload successful: {file_name} to field {field}")
+                        logger.info(f">>> 업로드 성공: {file_name} (필드: {field}) <<<")
                         success = True
                         return {"success": True, "field": field}
                     except Exception as e:
                         last_error = e
                         if attempt < self.max_retries - 1:
-                            logger.warning(f"Upload attempt {attempt+1} failed for field '{field}', retrying: {e}")
+                            logger.warning(f"업로드 시도 {attempt+1} 실패 (필드: '{field}'), 재시도 중: {e}")
                             time.sleep(self.retry_delay)
                         else:
-                            logger.warning(f"All attempts failed for field '{field}', trying next field: {e}")
+                            logger.warning(f"모든 시도 실패 (필드: '{field}'), 다음 필드 시도 중: {e}")
                 
                 if success:
                     break
@@ -287,6 +313,10 @@ class Uploader:
         """
         # 하드코딩된 프로젝트 이름 사용
         project_name = "AXRD-296"
+        
+        # 배치 업로드 시작 로그
+        logger.info(f"\n\n===== Shotgrid 배치 업로드 시작: {len(file_infos)}개 파일 =====")
+        
         results = {
             "total": len(file_infos),
             "success": 0,
@@ -296,24 +326,29 @@ class Uploader:
         
         for i, file_info in enumerate(file_infos):
             try:
+                file_name = file_info.get("file_name") or os.path.basename(file_info.get("file_path", ""))
+                logger.info(f"\n----- 파일 {i+1}/{len(file_infos)} 업로드: {file_name} -----")
+                
                 # Upload file
                 upload_result = self.upload_file(file_info, project_name)
                 
                 # Add to results
                 results["details"].append({
-                    "file": file_info.get("file_name"),
+                    "file": file_name,
                     "result": upload_result
                 })
                 
                 if upload_result.get("success"):
                     results["success"] += 1
+                    logger.info(f"파일 {i+1}/{len(file_infos)} 업로드 성공: {file_name}")
                 else:
                     results["failure"] += 1
+                    logger.error(f"파일 {i+1}/{len(file_infos)} 업로드 실패: {file_name}")
                     
                 # Call progress callback if provided
                 if callback:
                     callback(i + 1, len(file_infos), upload_result)
-                    
+                
             except Exception as e:
                 logger.error(f"Error uploading file {file_info.get('file_name')}: {e}")
                 results["failure"] += 1
@@ -325,6 +360,9 @@ class Uploader:
                 # Call progress callback if provided
                 if callback:
                     callback(i + 1, len(file_infos), {"success": False, "error": str(e)})
+        
+        # 배치 업로드 완료 로그
+        logger.info(f"\n===== Shotgrid 배치 업로드 완료: 총 {len(file_infos)}개 중 {results['success']}개 성공, {results['failure']}개 실패 =====\n")
         
         return results
     

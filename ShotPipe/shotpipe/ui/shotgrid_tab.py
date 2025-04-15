@@ -11,14 +11,18 @@ from PyQt5.QtWidgets import (
     QFileDialog, QProgressBar, QComboBox, QGroupBox,
     QMessageBox, QDialog, QFormLayout, QCheckBox
 )
-from PyQt5.QtCore import Qt, pyqtSignal, QThread, pyqtSlot
+from PyQt5.QtCore import Qt, pyqtSignal, QThread, pyqtSlot, QTimer
 from PyQt5.QtGui import QColor
 from ..shotgrid.api_connector import ShotgridConnector
 from ..shotgrid.entity_manager import EntityManager
 from ..shotgrid.uploader import Uploader
 from ..config import config
 from dotenv import load_dotenv
-from ..utils.history_manager import UploadHistoryManager
+try:
+    from ..utils.history_manager import UploadHistoryManager
+except ImportError:
+    # 절대 경로로 시도
+    from shotpipe.utils.history_manager import UploadHistoryManager
 
 # .env 파일 로드
 load_dotenv()
@@ -148,24 +152,30 @@ class ShotgridTab(QWidget):
         self.files_table = QTableWidget()
         self.files_table.setColumnCount(7)  # 컬럼 수 7개로 변경
         self.files_table.setHorizontalHeaderLabels(["", "파일명", "시퀀스", "샷", "태스크", "버전", "상태"]) # 첫 번째 컬럼 추가
-        self.files_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents) # 체크박스 컬럼
-        self.files_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch) # 파일명 컬럼
+        
+        # 컬럼 너비 설정 변경
+        header = self.files_table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.Interactive)  # 기본적으로 모든 컬럼 사용자 조절 가능
+        header.setSectionResizeMode(0, QHeaderView.Fixed)  # 체크박스 컬럼은 고정
+        header.resizeSection(0, 30)  # 체크박스 컬럼 폭 고정
+        
+        # 초기 열 너비 설정
+        self.files_table.setColumnWidth(1, 250)  # 파일명 초기 너비: 250픽셀
+        self.files_table.setColumnWidth(2, 80)   # 시퀀스 초기 너비: 80픽셀
+        self.files_table.setColumnWidth(3, 80)   # 샷 초기 너비: 80픽셀
+        self.files_table.setColumnWidth(4, 100)  # 태스크 초기 너비: 100픽셀
+        self.files_table.setColumnWidth(5, 80)   # 버전 초기 너비: 80픽셀
+        self.files_table.setColumnWidth(6, 80)   # 상태 초기 너비: 80픽셀
+        
+        # 헤더 툴팁 설정
+        header.setToolTip("컬럼 경계를 드래그하여 너비를 조절할 수 있습니다")
+        
         self.files_table.setSelectionBehavior(QTableWidget.SelectRows)
         
         # Add header checkbox for select/deselect all
         self.header_checkbox = QCheckBox()
         self.header_checkbox.stateChanged.connect(self.toggle_all_rows)
-        self.files_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Fixed)
-        self.files_table.horizontalHeader().resizeSection(0, 30) # 체크박스 컬럼 폭 고정
-        self.files_table.horizontalHeader().setStyleSheet("QHeaderView::section:horizontal#0 { padding-left: 10px; }")
-        # Place checkbox in header
-        header = self.files_table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.Fixed)
-        header.setMinimumSectionSize(30)
-        header.setMaximumSectionSize(30)
-        # Header에 checkbox를 직접 추가하는 것은 표준적이지 않음. 대신 QHeaderView를 서브클래싱하거나
-        # 별도 레이아웃을 사용해야 함. 여기서는 간단하게 기능 구현.
-
+        
         # 파일 타입 필터 버튼 추가
         filter_layout = QHBoxLayout()
         filter_label = QLabel("선택 필터:")
@@ -177,10 +187,15 @@ class ShotgridTab(QWidget):
         self.filter_image_btn.clicked.connect(lambda: self.filter_rows("image"))
         self.filter_video_btn.clicked.connect(lambda: self.filter_rows("video"))
         
+        # 자동 열 너비 조절 버튼 추가
+        self.resize_columns_btn = QPushButton("컬럼 너비 자동 조절")
+        self.resize_columns_btn.clicked.connect(self.resize_columns_to_contents)
+        
         filter_layout.addWidget(filter_label)
         filter_layout.addWidget(self.filter_all_btn)
         filter_layout.addWidget(self.filter_image_btn)
         filter_layout.addWidget(self.filter_video_btn)
+        filter_layout.addWidget(self.resize_columns_btn)
         filter_layout.addStretch()
 
         # Add widgets to layout
@@ -337,7 +352,22 @@ class ShotgridTab(QWidget):
         """Set the processed files from the file tab."""
         try:
             logger.info(f"Received {len(file_infos)} processed files from file tab")
-            self.processed_files = file_infos
+            
+            # 중복 제거를 위해 processed_path를 기준으로 기존 항목을 필터링
+            if hasattr(self, 'processed_files') and self.processed_files:
+                # 기존 파일의 processed_path 목록 생성
+                existing_paths = {info.get('processed_path', '') for info in self.processed_files}
+                
+                # 중복되지 않은 새 파일만 추가
+                new_files = [info for info in file_infos if info.get('processed_path', '') not in existing_paths]
+                
+                # 기존 목록에 새 파일 추가
+                self.processed_files.extend(new_files)
+                logger.info(f"Added {len(new_files)} new files, filtered {len(file_infos) - len(new_files)} duplicates")
+            else:
+                # 처음 설정할 때는 그대로 할당
+                self.processed_files = file_infos
+            
             self.update_files_table()
         except Exception as e:
             logger.error(f"Error setting processed files: {e}", exc_info=True)
@@ -607,3 +637,18 @@ class ShotgridTab(QWidget):
             else:
                 # Task 정보가 없는 경우 일단 숨김
                 self.files_table.setRowHidden(i, True)
+
+    def resize_columns_to_contents(self):
+        """컬럼 너비를 내용에 맞게 자동 조절"""
+        self.files_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        # 체크박스 컬럼은 고정 크기 유지
+        self.files_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Fixed)
+        self.files_table.horizontalHeader().resizeSection(0, 30)
+        
+        # 잠시 후 Interactive 모드로 다시 변경 (자동 조절 후 사용자가 다시 조절할 수 있도록)
+        QTimer.singleShot(100, self._reset_resize_mode)
+    
+    def _reset_resize_mode(self):
+        """컬럼 크기 조절 모드를 Interactive로 되돌림"""
+        self.files_table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
+        self.files_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Fixed)
