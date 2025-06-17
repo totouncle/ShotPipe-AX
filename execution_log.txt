@@ -1,0 +1,41 @@
+Shotgrid credentials not found in .env file
+Failed to initialize file tab UI: 'ShotgridConnector' object has no attribute 'get_user_info'
+Traceback (most recent call last):
+  File "/Users/onset/Documents/vscode/AX_pipe/shotpipe/ui/file_tab.py", line 489, in _init_ui
+    self.update_shotgrid_status()
+  File "/Users/onset/Documents/vscode/AX_pipe/shotpipe/ui/file_tab.py", line 1637, in update_shotgrid_status
+    self.shotgrid_status_label.setText(f"✅ Shotgrid 연결됨 (사용자: {self.shotgrid_connector.get_user_info()})")
+                                                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'ShotgridConnector' object has no attribute 'get_user_info'
+2025-06-16 11:41:45.619 python3[1943:146695726] +[IMKClient subclass]: chose IMKClient_Modern
+2025-06-16 11:41:45.619 python3[1943:146695726] +[IMKInputSession subclass]: chose IMKInputSession_Modern
+Project '-- 프로젝트 선택 --' not found
+Uncaught exception
+Traceback (most recent call last):
+  File "/Users/onset/Documents/vscode/AX_pipe/shotpipe/ui/file_tab.py", line 995, in scan_files
+    self.progress_bar.setVisible(True)
+    ^^^^^^^^^^^^^^^^^
+AttributeError: 'FileTab' object has no attribute 'progress_bar'
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/onset/Documents/vscode/AX_pipe/shotpipe/ui/file_tab.py", line 1011, in scan_files
+    self.progress_bar.setRange(0, 100)
+    ^^^^^^^^^^^^^^^^^
+AttributeError: 'FileTab' object has no attribute 'progress_bar'
+An unhandled exception occurred:
+Traceback (most recent call last):
+  File "/Users/onset/Documents/vscode/AX_pipe/shotpipe/ui/file_tab.py", line 995, in scan_files
+    self.progress_bar.setVisible(True)
+    ^^^^^^^^^^^^^^^^^
+AttributeError: 'FileTab' object has no attribute 'progress_bar'
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/onset/Documents/vscode/AX_pipe/shotpipe/ui/file_tab.py", line 1011, in scan_files
+    self.progress_bar.setRange(0, 100)
+    ^^^^^^^^^^^^^^^^^
+AttributeError: 'FileTab' object has no attribute 'progress_bar'
+qt.qpa.fonts: Populating font family aliases took 174 ms. Replace uses of missing font family "Consolas" with one that exists to avoid this cost. 

@@ -1,0 +1,218 @@
+name: 🚀 Build Windows Release
+
+on:
+  push:
+    tags:
+      - 'v*'  # v1.0.0, v1.3.0 등의 태그가 푸시될 때 실행
+  workflow_dispatch:  # 수동 실행 옵션
+    inputs:
+      version:
+        description: 'Release version (e.g., v1.3.0)'
+        required: true
+        default: 'v1.3.0'
+
+jobs:
+  build:
+    name: 🔨 Build ShotPipe for Windows
+    runs-on: windows-latest
+    
+    steps:
+    - name: 📥 Checkout Code
+      uses: actions/checkout@v4
+    
+    - name: 🐍 Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+        cache: 'pip'
+    
+    - name: 📦 Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pyinstaller
+    
+    - name: 🔨 Build Executable
+      run: |
+        echo "Building ShotPipe.exe..."
+        pyinstaller shotpipe.spec --clean --noconfirm
+        
+    - name: ✅ Verify Build
+      run: |
+        if (Test-Path "dist\ShotPipe.exe") {
+          $size = (Get-Item "dist\ShotPipe.exe").Length / 1MB
+          Write-Output "✅ Build successful! Size: $([math]::Round($size, 2))MB"
+        } else {
+          Write-Error "❌ Build failed - ShotPipe.exe not found"
+          exit 1
+        }
+    
+    - name: 📋 Create Release Package
+      run: |
+        # 배포 패키지 디렉토리 생성
+        New-Item -ItemType Directory -Force -Path "release-package"
+        
+        # 실행파일 복사
+        Copy-Item "dist\ShotPipe.exe" "release-package\"
+        
+        # 사용자 가이드 복사
+        if (Test-Path "WINDOWS_USER_GUIDE.md") {
+          Copy-Item "WINDOWS_USER_GUIDE.md" "release-package\"
+        }
+        if (Test-Path "README.md") {
+          Copy-Item "README.md" "release-package\"
+        }
+        
+        # 빠른 시작 가이드 생성
+        @"
+        ╔══════════════════════════════════════════════════════════════╗
+        ║                    🎬 ShotPipe v1.3.0 🎬                    ║
+        ║              AI Generated File → Shotgrid                   ║
+        ╚══════════════════════════════════════════════════════════════╝
+
+        🚀 빠른 시작:
+        1. ShotPipe.exe 더블클릭
+        2. F1 키로 매뉴얼 열기 
+        3. "파일 처리" 탭에서 시작
+
+        🔧 Shotgrid 설정:
+        - 관리자에게 API 정보 요청
+        - "Shotgrid 업로드" 탭에서 연결 설정
+
+        📞 지원:
+        - 매뉴얼: F1 키 또는 도움말 메뉴
+        - 로그: 하단 로그 창 확인
+
+        즐거운 작업 되세요! 🎬
+        "@ | Out-File -FilePath "release-package\README.txt" -Encoding UTF8
+        
+        # ZIP 파일 생성
+        $version = "${{ github.event.inputs.version || github.ref_name }}"
+        $zipName = "ShotPipe_${version}_Windows.zip"
+        Compress-Archive -Path "release-package\*" -DestinationPath $zipName
+        
+        echo "RELEASE_ZIP=$zipName" >> $env:GITHUB_ENV
+        echo "RELEASE_VERSION=$version" >> $env:GITHUB_ENV
+    
+    - name: 📤 Upload Artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: ShotPipe-Windows-${{ env.RELEASE_VERSION }}
+        path: |
+          ${{ env.RELEASE_ZIP }}
+          dist/ShotPipe.exe
+        retention-days: 30
+    
+    - name: 🎉 Create GitHub Release
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          ${{ env.RELEASE_ZIP }}
+        name: "ShotPipe ${{ env.RELEASE_VERSION }} - Windows Release"
+        body: |
+          # 🎬 ShotPipe ${{ env.RELEASE_VERSION }} - Windows Release
+          
+          ## 📦 다운로드
+          - **ShotPipe_${{ env.RELEASE_VERSION }}_Windows.zip** - 완전한 배포 패키지
+          
+          ## 🚀 설치 방법
+          1. ZIP 파일 다운로드 및 압축 해제
+          2. `ShotPipe.exe` 더블클릭으로 실행
+          3. F1 키로 매뉴얼 확인
+          
+          ## ✨ 주요 기능
+          - 🤖 AI 생성 파일 자동 처리
+          - 📁 스마트 네이밍 규칙 적용  
+          - 🎯 파일 유형별 태스크 자동 할당
+          - 🔗 Shotgrid 완전 연동
+          - 🎨 다크 테마 UI
+          - 📖 F1 내장 매뉴얼
+          
+          ## 📋 시스템 요구사항
+          - Windows 10/11 (64-bit)
+          - Python 설치 불필요 (실행파일에 포함)
+          
+          ## 🔧 Shotgrid 설정
+          관리자에게 다음 정보를 요청하세요:
+          - 서버 URL: `https://your-studio.shotgunstudio.com`
+          - 스크립트 이름 및 API 키
+          
+          **즐거운 작업 되세요!** 🎊
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-portable:
+    name: 📦 Build Portable Package
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 📥 Checkout Code
+      uses: actions/checkout@v4
+    
+    - name: 📋 Create Portable Package
+      run: |
+        # 포터블 패키지 디렉토리 생성
+        mkdir -p portable-package
+        
+        # 소스코드 복사
+        cp -r shotpipe portable-package/
+        cp -r vendor portable-package/ 2>/dev/null || echo "vendor 폴더 없음"
+        cp main.py requirements.txt setup_portable.bat portable-package/
+        cp WINDOWS_USER_GUIDE.md README.md portable-package/ 2>/dev/null || echo "일부 문서 파일 없음"
+        
+        # 포터블 실행 스크립트 생성
+        cat > portable-package/ShotPipe_Portable_Start.bat << 'EOF'
+        @echo off
+        chcp 65001
+        cls
+        echo ╔══════════════════════════════════════════════════════════════╗
+        echo ║                    🎬 ShotPipe v1.3.0 🎬                    ║
+        echo ║              AI Generated File → Shotgrid                   ║
+        ╚══════════════════════════════════════════════════════════════╝
+        echo.
+        
+        echo 🚀 ShotPipe 시작 중...
+        
+        :: 가상환경이 있으면 활성화
+        if exist "venv\Scripts\activate.bat" (
+            echo 🔄 가상환경 활성화...
+            call venv\Scripts\activate.bat
+        )
+        
+        :: ShotPipe 실행
+        echo ✨ ShotPipe 실행!
+        python main.py
+        
+        if errorlevel 1 (
+            echo.
+            echo ❌ 실행 중 오류가 발생했습니다.
+            echo 💡 setup_portable.bat를 먼저 실행해보세요.
+            pause
+        )
+        EOF
+        
+        # ZIP 파일 생성
+        version="${{ github.event.inputs.version || github.ref_name }}"
+        zip_name="ShotPipe_${version}_Portable.zip"
+        cd portable-package && zip -r ../$zip_name . && cd ..
+        
+        echo "PORTABLE_ZIP=$zip_name" >> $GITHUB_ENV
+        echo "RELEASE_VERSION=$version" >> $GITHUB_ENV
+    
+    - name: 📤 Upload Portable Artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: ShotPipe-Portable-${{ env.RELEASE_VERSION }}
+        path: ${{ env.PORTABLE_ZIP }}
+        retention-days: 30
+    
+    - name: 🎉 Add to Release
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v1
+      with:
+        files: ${{ env.PORTABLE_ZIP }}
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

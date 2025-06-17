@@ -1,0 +1,40 @@
+Shotgrid credentials not found in .env file
+Failed to get user info: 'Shotgun' object has no attribute 'get_session_user'
+Failed to initialize file tab UI: 'QHeaderView' object has no attribute 'setCellWidget'
+Traceback (most recent call last):
+  File "/Users/onset/Documents/vscode/AX_pipe/shotpipe/ui/file_tab.py", line 588, in _init_ui
+    self.file_table.horizontalHeader().setCellWidget(0, self.header_checkbox)
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'QHeaderView' object has no attribute 'setCellWidget'. Did you mean: 'setCornerWidget'?
+2025-06-16 11:43:26.376 python3[2990:146700330] +[IMKClient subclass]: chose IMKClient_Modern
+2025-06-16 11:43:26.376 python3[2990:146700330] +[IMKInputSession subclass]: chose IMKInputSession_Modern
+Project '-- 프로젝트 선택 --' not found
+Uncaught exception
+Traceback (most recent call last):
+  File "/Users/onset/Documents/vscode/AX_pipe/shotpipe/ui/file_tab.py", line 995, in scan_files
+    self.progress_bar.setVisible(True)
+    ^^^^^^^^^^^^^^^^^
+AttributeError: 'FileTab' object has no attribute 'progress_bar'
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/onset/Documents/vscode/AX_pipe/shotpipe/ui/file_tab.py", line 1011, in scan_files
+    self.progress_bar.setRange(0, 100)
+    ^^^^^^^^^^^^^^^^^
+AttributeError: 'FileTab' object has no attribute 'progress_bar'
+An unhandled exception occurred:
+Traceback (most recent call last):
+  File "/Users/onset/Documents/vscode/AX_pipe/shotpipe/ui/file_tab.py", line 995, in scan_files
+    self.progress_bar.setVisible(True)
+    ^^^^^^^^^^^^^^^^^
+AttributeError: 'FileTab' object has no attribute 'progress_bar'
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/onset/Documents/vscode/AX_pipe/shotpipe/ui/file_tab.py", line 1011, in scan_files
+    self.progress_bar.setRange(0, 100)
+    ^^^^^^^^^^^^^^^^^
+AttributeError: 'FileTab' object has no attribute 'progress_bar'
+qt.qpa.fonts: Populating font family aliases took 186 ms. Replace uses of missing font family "Consolas" with one that exists to avoid this cost. 
