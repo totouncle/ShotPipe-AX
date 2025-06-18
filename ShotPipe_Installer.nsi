@@ -3,14 +3,19 @@
 ; AI Generated File → Shotgrid Automation Tool
 ;=============================================================================
 
-; 기본 설정
+; 기본 설정 - GitHub Actions 호환성 개선
 !define PRODUCT_NAME "ShotPipe"
 !define PRODUCT_VERSION "1.3.0"
 !define PRODUCT_PUBLISHER "ShotPipe Team"
-!define PRODUCT_WEB_SITE "https://github.com/your-repo/shotpipe"
+!define PRODUCT_WEB_SITE "https://github.com/lennonvfx/AX_pipe"
 !define PRODUCT_DIR_REGKEY "Software\Microsoft\Windows\CurrentVersion\App Paths\ShotPipe.exe"
 !define PRODUCT_UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT_NAME}"
 !define PRODUCT_UNINST_ROOT_KEY "HKLM"
+
+; 빌드 환경 검증
+!ifndef PRODUCT_NAME
+  !error "PRODUCT_NAME이 정의되지 않았습니다."
+!endif
 
 ; 모던 UI 포함
 !include "MUI2.nsh"
@@ -70,20 +75,36 @@ LangString WelcomePageText ${LANG_KOREAN} "이 마법사는 AI 생성 파일을 
 LangString WelcomePageTitle ${LANG_ENGLISH} "Welcome to the ShotPipe Setup Wizard"
 LangString WelcomePageText ${LANG_ENGLISH} "This wizard will install ShotPipe, which automates uploading AI-generated files to Shotgrid.$\r$\n$\r$\nClick Next to continue."
 
-; 설치 섹션
+; 설치 섹션 - 파일 경로 검증 강화
 Section "ShotPipe (필수)" SecMain
     SectionIn RO
     
     ; 설치 디렉토리 생성
     SetOutPath $INSTDIR
     
-    ; 파일 복사 - 실행파일
-    File "dist\ShotPipe.exe"
+    ; 파일 존재 여부 확인 후 복사
+    IfFileExists "dist\ShotPipe.exe" 0 exe_not_found
+        File "dist\ShotPipe.exe"
+        DetailPrint "✅ ShotPipe.exe 설치 완료"
+        Goto exe_done
+    exe_not_found:
+        DetailPrint "❌ 오류: dist\ShotPipe.exe를 찾을 수 없습니다."
+        MessageBox MB_ICONSTOP "설치 오류: 실행파일을 찾을 수 없습니다.$\nPyInstaller 빌드가 완료되었는지 확인하세요."
+        Abort
+    exe_done:
     
-    ; 문서 파일들
-    File /nonfatal "README.md"
-    File /nonfatal "WINDOWS_USER_GUIDE.md"
-    File /nonfatal "LICENSE.txt"
+    ; 문서 파일들 - 존재 여부 확인
+    IfFileExists "README.md" 0 +3
+        File "README.md"
+        DetailPrint "✅ README.md 설치"
+    
+    IfFileExists "WINDOWS_USER_GUIDE.md" 0 +3
+        File "WINDOWS_USER_GUIDE.md"
+        DetailPrint "✅ WINDOWS_USER_GUIDE.md 설치"
+    
+    IfFileExists "LICENSE.txt" 0 +3
+        File "LICENSE.txt"
+        DetailPrint "✅ LICENSE.txt 설치"
     
     ; 작업 폴더 생성
     CreateDirectory "$DOCUMENTS\ShotPipe"
@@ -119,17 +140,38 @@ Section "ShotPipe (필수)" SecMain
 SectionEnd
 
 Section "예제 파일" SecExamples
+    DetailPrint "예제 파일 설치 중..."
     SetOutPath "$DOCUMENTS\ShotPipe\examples"
-    ; 예제 파일들이 있다면 여기에 추가
-    File /nonfatal /r "examples\*.*"
+    
+    ; 예제 파일들이 있는지 확인 후 설치
+    IfFileExists "examples\*.*" 0 no_examples
+        File /nonfatal /r "examples\*.*"
+        DetailPrint "✅ 예제 파일 설치 완료"
+        Goto examples_done
+    no_examples:
+        DetailPrint "ℹ️ 예제 파일이 없습니다 (선택사항)"
+    examples_done:
 SectionEnd
 
 Section "Visual C++ 재배포 패키지" SecVCRedist
+    DetailPrint "Visual C++ 재배포 패키지 확인 중..."
+    
     ; VC++ 재배포 패키지 자동 설치 (필요한 경우)
-    ; 이 부분은 실제 재배포 패키지 파일이 있을 때 활성화
-    ; File "vcredist_x64.exe"
-    ; ExecWait "$INSTDIR\vcredist_x64.exe /quiet"
-    ; Delete "$INSTDIR\vcredist_x64.exe"
+    ; GitHub Actions에서 빌드할 때는 이미 설치되어 있으므로 건너뛰기
+    IfFileExists "vcredist_x64.exe" 0 no_vcredist
+        DetailPrint "Visual C++ 재배포 패키지 설치 중..."
+        File "vcredist_x64.exe"
+        ExecWait "$INSTDIR\vcredist_x64.exe /quiet" $0
+        Delete "$INSTDIR\vcredist_x64.exe"
+        ${If} $0 == 0
+            DetailPrint "✅ Visual C++ 재배포 패키지 설치 완료"
+        ${Else}
+            DetailPrint "⚠️ Visual C++ 재배포 패키지 설치 중 문제 발생 (코드: $0)"
+        ${EndIf}
+        Goto vcredist_done
+    no_vcredist:
+        DetailPrint "ℹ️ Visual C++ 재배포 패키지 파일이 없습니다 (선택사항)"
+    vcredist_done:
 SectionEnd
 
 ; 섹션 설명
@@ -151,23 +193,34 @@ Function .onInstSuccess
     End:
 FunctionEnd
 
-; 설치 전 체크
+; 설치 전 체크 - 개선된 검증
 Function .onInit
+    ; 디버그 정보 출력
+    DetailPrint "설치 프로그램 초기화 중..."
+    
     ; Windows 버전 확인
     ${If} ${AtLeastWin10}
-        ; Windows 10 이상
+        DetailPrint "✅ Windows 버전: 10 이상 (권장)"
     ${ElseIf} ${AtLeastWin7}
+        DetailPrint "⚠️ Windows 버전: 7-8 (호환 가능하지만 10 이상 권장)"
         MessageBox MB_ICONEXCLAMATION "Windows 10 이상을 권장합니다. 일부 기능이 제한될 수 있습니다."
     ${Else}
+        DetailPrint "❌ Windows 버전: 7 미만 (지원되지 않음)"
         MessageBox MB_ICONSTOP "Windows 7 이상이 필요합니다."
         Abort
     ${EndIf}
     
-    ; 관리자 권한 확인
+    ; 관리자 권한 확인 - 더 유연하게 처리
     UserInfo::GetAccountType
     pop $0
-    ${If} $0 != "admin"
-        MessageBox MB_ICONSTOP "관리자 권한으로 실행해주세요."
+    DetailPrint "사용자 권한: $0"
+    ${If} $0 == "admin"
+        DetailPrint "✅ 관리자 권한으로 실행 중"
+    ${ElseIf} $0 == "power"
+        DetailPrint "✅ Power User 권한으로 실행 중"
+    ${Else}
+        DetailPrint "⚠️ 제한된 사용자 권한"
+        MessageBox MB_ICONQUESTION|MB_YESNO "관리자 권한이 아닙니다. 일부 기능이 제한될 수 있습니다.$\n계속 진행하시겠습니까?" IDYES +2
         Abort
     ${EndIf}
     
