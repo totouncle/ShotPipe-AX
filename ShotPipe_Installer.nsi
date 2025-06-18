@@ -143,13 +143,17 @@ Section "예제 파일" SecExamples
     DetailPrint "예제 파일 설치 중..."
     SetOutPath "$DOCUMENTS\ShotPipe\examples"
     
-    ; 예제 파일들이 있는지 확인 후 설치
-    IfFileExists "examples\*.*" 0 no_examples
-        File /nonfatal /r "examples\*.*"
-        DetailPrint "✅ 예제 파일 설치 완료"
-        Goto examples_done
-    no_examples:
-        DetailPrint "ℹ️ 예제 파일이 없습니다 (선택사항)"
+    ; 예제 파일들이 있는지 확인 후 설치 - GitHub Actions에서는 examples 폴더가 없음
+    IfFileExists "examples" 0 no_examples_dir
+        IfFileExists "examples\*.*" 0 no_examples
+            File /nonfatal /r "examples\*.*"
+            DetailPrint "[OK] 예제 파일 설치 완료"
+            Goto examples_done
+        no_examples:
+            DetailPrint "[INFO] 예제 폴더는 있지만 파일이 없습니다"
+            Goto examples_done
+    no_examples_dir:
+        DetailPrint "[INFO] 예제 파일이 없습니다 (선택사항)"
     examples_done:
 SectionEnd
 
@@ -160,17 +164,21 @@ Section "Visual C++ 재배포 패키지" SecVCRedist
     ; GitHub Actions에서 빌드할 때는 이미 설치되어 있으므로 건너뛰기
     IfFileExists "vcredist_x64.exe" 0 no_vcredist
         DetailPrint "Visual C++ 재배포 패키지 설치 중..."
-        File "vcredist_x64.exe"
-        ExecWait "$INSTDIR\vcredist_x64.exe /quiet" $0
-        Delete "$INSTDIR\vcredist_x64.exe"
-        ${If} $0 == 0
-            DetailPrint "✅ Visual C++ 재배포 패키지 설치 완료"
-        ${Else}
-            DetailPrint "⚠️ Visual C++ 재배포 패키지 설치 중 문제 발생 (코드: $0)"
-        ${EndIf}
-        Goto vcredist_done
+        File /nonfatal "vcredist_x64.exe"
+        IfErrors vcredist_error
+            ExecWait "$INSTDIR\vcredist_x64.exe /quiet" $0
+            Delete "$INSTDIR\vcredist_x64.exe"
+            ${If} $0 == 0
+                DetailPrint "[OK] Visual C++ 재배포 패키지 설치 완료"
+            ${Else}
+                DetailPrint "[WARN] Visual C++ 재배포 패키지 설치 중 문제 발생 (코드: $0)"
+            ${EndIf}
+            Goto vcredist_done
+        vcredist_error:
+            DetailPrint "[ERROR] vcredist_x64.exe 파일 복사 실패"
+            Goto vcredist_done
     no_vcredist:
-        DetailPrint "ℹ️ Visual C++ 재배포 패키지 파일이 없습니다 (선택사항)"
+        DetailPrint "[INFO] Visual C++ 재배포 패키지 파일이 없습니다 (선택사항)"
     vcredist_done:
 SectionEnd
 
