@@ -28,7 +28,7 @@ jobs:
       uses: actions/checkout@v4
       
     - name: 🐍 Python 설정
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: '3.11'
         
@@ -62,7 +62,7 @@ jobs:
         Compress-Archive -Path "ShotPipe_Portable" -DestinationPath "ShotPipe_v1.3.0_Portable.zip" -Force
         
     - name: 📤 빌드 결과물 업로드
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: ShotPipe-Windows-Build
         path: |
