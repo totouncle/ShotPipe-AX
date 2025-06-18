@@ -20,6 +20,7 @@
 ; 모던 UI 포함
 !include "MUI2.nsh"
 !include "FileFunc.nsh"
+!include "LogicLib.nsh"
 
 ; 기본 설정
 Name "${PRODUCT_NAME} ${PRODUCT_VERSION}"
@@ -168,11 +169,13 @@ Section "Visual C++ 재배포 패키지" SecVCRedist
         IfErrors vcredist_error
             ExecWait "$INSTDIR\vcredist_x64.exe /quiet" $0
             Delete "$INSTDIR\vcredist_x64.exe"
-            ${If} $0 == 0
+            IntCmp $0 0 vcredist_success vcredist_failed vcredist_failed
+            vcredist_success:
                 DetailPrint "[OK] Visual C++ 재배포 패키지 설치 완료"
-            ${Else}
+                Goto vcredist_result_done
+            vcredist_failed:
                 DetailPrint "[WARN] Visual C++ 재배포 패키지 설치 중 문제 발생 (코드: $0)"
-            ${EndIf}
+            vcredist_result_done:
             Goto vcredist_done
         vcredist_error:
             DetailPrint "[ERROR] vcredist_x64.exe 파일 복사 실패"
@@ -206,14 +209,14 @@ Function .onInit
     ; 디버그 정보 출력
     DetailPrint "설치 프로그램 초기화 중..."
     
-    ; Windows 버전 확인
+    ; Windows 버전 확인 - 기본 NSIS 문법 사용
     ${If} ${AtLeastWin10}
-        DetailPrint "✅ Windows 버전: 10 이상 (권장)"
+        DetailPrint "[OK] Windows 버전: 10 이상 (권장)"
     ${ElseIf} ${AtLeastWin7}
-        DetailPrint "⚠️ Windows 버전: 7-8 (호환 가능하지만 10 이상 권장)"
+        DetailPrint "[WARN] Windows 버전: 7-8 (호환 가능하지만 10 이상 권장)"
         MessageBox MB_ICONEXCLAMATION "Windows 10 이상을 권장합니다. 일부 기능이 제한될 수 있습니다."
     ${Else}
-        DetailPrint "❌ Windows 버전: 7 미만 (지원되지 않음)"
+        DetailPrint "[ERROR] Windows 버전: 7 미만 (지원되지 않음)"
         MessageBox MB_ICONSTOP "Windows 7 이상이 필요합니다."
         Abort
     ${EndIf}
@@ -222,15 +225,18 @@ Function .onInit
     UserInfo::GetAccountType
     pop $0
     DetailPrint "사용자 권한: $0"
-    ${If} $0 == "admin"
-        DetailPrint "✅ 관리자 권한으로 실행 중"
-    ${ElseIf} $0 == "power"
-        DetailPrint "✅ Power User 권한으로 실행 중"
-    ${Else}
-        DetailPrint "⚠️ 제한된 사용자 권한"
-        MessageBox MB_ICONQUESTION|MB_YESNO "관리자 권한이 아닙니다. 일부 기능이 제한될 수 있습니다.$\n계속 진행하시겠습니까?" IDYES +2
-        Abort
-    ${EndIf}
+    StrCmp $0 "admin" admin_ok
+    StrCmp $0 "power" power_ok
+    ; 제한된 사용자 권한
+    DetailPrint "[WARN] 제한된 사용자 권한"
+    MessageBox MB_ICONQUESTION|MB_YESNO "관리자 권한이 아닙니다. 일부 기능이 제한될 수 있습니다.$\n계속 진행하시겠습니까?" IDYES auth_done
+    Abort
+    admin_ok:
+        DetailPrint "[OK] 관리자 권한으로 실행 중"
+        Goto auth_done
+    power_ok:
+        DetailPrint "[OK] Power User 권한으로 실행 중"
+    auth_done:
     
     ; 기존 설치 확인
     ReadRegStr $R0 ${PRODUCT_UNINST_ROOT_KEY} "${PRODUCT_UNINST_KEY}" "UninstallString"
