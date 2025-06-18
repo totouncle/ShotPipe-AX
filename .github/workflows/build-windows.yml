@@ -61,52 +61,81 @@ jobs:
         makensis /VERSION
         
     - name: 🔍 빌드 환경 검증
+      shell: pwsh
       run: |
-        echo "=== Build Environment Check ==="
-        echo "Current directory:"
-        dir
-        echo "Python version:"
+        Write-Host "=== Build Environment Check ===" -ForegroundColor Cyan
+        Write-Host "Current directory:"
+        Get-Location
+        Get-ChildItem -Name
+        
+        Write-Host "`nPython version:"
         python --version
-        echo "PyInstaller version:"
+        
+        Write-Host "`nPyInstaller version:"
         pyinstaller --version
-        echo "Checking required files:"
-        if exist "main.py" echo "✅ main.py found" else echo "❌ main.py missing"
-        if exist "shotpipe.spec" echo "✅ shotpipe.spec found" else echo "❌ shotpipe.spec missing"
-        if exist "ShotPipe_Installer.nsi" echo "✅ ShotPipe_Installer.nsi found" else echo "❌ ShotPipe_Installer.nsi missing"
-        if exist "requirements.txt" echo "✅ requirements.txt found" else echo "❌ requirements.txt missing"
-        echo "=== Environment Check Complete ==="
+        
+        Write-Host "`nChecking required files:"
+        $files = @("main.py", "shotpipe.spec", "ShotPipe_Installer.nsi", "requirements.txt")
+        foreach ($file in $files) {
+            if (Test-Path $file) {
+                Write-Host "✅ $file found" -ForegroundColor Green
+            } else {
+                Write-Host "❌ $file missing" -ForegroundColor Red
+            }
+        }
+        
+        Write-Host "`nChecking shotpipe module:"
+        if (Test-Path "shotpipe") {
+            Write-Host "✅ shotpipe directory found" -ForegroundColor Green
+            $pyFiles = Get-ChildItem -Path "shotpipe" -Recurse -Filter "*.py" | Measure-Object
+            Write-Host "  └── Python files: $($pyFiles.Count)"
+        } else {
+            Write-Host "❌ shotpipe directory missing" -ForegroundColor Red
+        }
+        
+        Write-Host "`n=== Environment Check Complete ===" -ForegroundColor Cyan
         
     - name: 🚀 독립형 실행파일 빌드
+      shell: pwsh
       run: |
-        echo "🔨 PyInstaller로 실행파일 생성 중..."
-        echo "Working directory: %CD%"
-        echo "Starting PyInstaller build..."
+        Write-Host "🔨 PyInstaller로 실행파일 생성 중..." -ForegroundColor Yellow
+        Write-Host "Working directory: $(Get-Location)"
+        Write-Host "Starting PyInstaller build..."
+        
         pyinstaller --clean --noconfirm shotpipe.spec
-        echo "Build completed, checking output..."
-        if exist "dist\ShotPipe.exe" (
-          echo "✅ ShotPipe.exe created successfully"
-          dir "dist\ShotPipe.exe"
-        ) else (
-          echo "❌ ShotPipe.exe not found"
-          echo "Listing dist directory:"
-          dir dist
-          exit /b 1
-        )
+        
+        Write-Host "`nBuild completed, checking output..."
+        if (Test-Path "dist\ShotPipe.exe") {
+            Write-Host "✅ ShotPipe.exe created successfully" -ForegroundColor Green
+            Get-Item "dist\ShotPipe.exe" | Format-List Name, Length, LastWriteTime
+        } else {
+            Write-Host "❌ ShotPipe.exe not found" -ForegroundColor Red
+            Write-Host "Listing dist directory:"
+            if (Test-Path "dist") {
+                Get-ChildItem "dist" | Format-Table Name, Length, LastWriteTime
+            } else {
+                Write-Host "dist directory does not exist"
+            }
+            exit 1
+        }
         
     - name: 🎁 NSIS 인스톨러 빌드
+      shell: pwsh
       run: |
-        echo "📦 NSIS 인스톨러 생성 중..."
-        echo "Checking NSIS installation..."
+        Write-Host "📦 NSIS 인스톨러 생성 중..." -ForegroundColor Yellow
+        Write-Host "Checking NSIS installation..."
         makensis /VERSION
-        echo "Building installer..."
+        
+        Write-Host "`nBuilding installer..."
         makensis ShotPipe_Installer.nsi
-        if exist "ShotPipe_Setup.exe" (
-          echo "✅ Installer created successfully"
-          dir "ShotPipe_Setup.exe"
-        ) else (
-          echo "❌ Installer creation failed"
-          exit /b 1
-        )
+        
+        if (Test-Path "ShotPipe_Setup.exe") {
+            Write-Host "✅ Installer created successfully" -ForegroundColor Green
+            Get-Item "ShotPipe_Setup.exe" | Format-List Name, Length, LastWriteTime
+        } else {
+            Write-Host "❌ Installer creation failed" -ForegroundColor Red
+            exit 1
+        }
         
     - name: 📦 포터블 버전 생성
       shell: powershell
@@ -135,14 +164,35 @@ jobs:
         retention-days: 30
         
     - name: 🎉 빌드 완료 알림
+      shell: pwsh
       run: |
-        echo "==============================================="
-        echo "🎉 빌드 완료!"
-        echo "==============================================="
-        echo "생성된 파일들:"
-        if exist "ShotPipe_Setup.exe" echo "✅ ShotPipe_Setup.exe (인스톨러)"
-        if exist "ShotPipe_*.zip" echo "✅ ShotPipe_*_Portable.zip (포터블)"
-        if exist "dist\ShotPipe.exe" echo "✅ dist\ShotPipe.exe (실행파일)"
-        echo "==============================================="
-        echo "다운로드: Actions → Artifacts 에서 확인"
-        echo "==============================================="
+        Write-Host "===============================================" -ForegroundColor Cyan
+        Write-Host "🎉 빌드 완료!" -ForegroundColor Green
+        Write-Host "===============================================" -ForegroundColor Cyan
+        Write-Host "생성된 파일들:"
+        
+        $files = @(
+            @{Path="ShotPipe_Setup.exe"; Description="인스톨러"},
+            @{Path="dist\ShotPipe.exe"; Description="실행파일"}
+        )
+        
+        foreach ($file in $files) {
+            if (Test-Path $file.Path) {
+                $item = Get-Item $file.Path
+                $sizeMB = [math]::Round($item.Length / 1MB, 2)
+                Write-Host "✅ $($file.Path) ($($file.Description)) - ${sizeMB}MB" -ForegroundColor Green
+            }
+        }
+        
+        # 포터블 ZIP 파일 찾기
+        $zipFiles = Get-ChildItem -Filter "ShotPipe_*.zip" -ErrorAction SilentlyContinue
+        if ($zipFiles) {
+            foreach ($zip in $zipFiles) {
+                $sizeMB = [math]::Round($zip.Length / 1MB, 2)
+                Write-Host "✅ $($zip.Name) (포터블) - ${sizeMB}MB" -ForegroundColor Green
+            }
+        }
+        
+        Write-Host "===============================================" -ForegroundColor Cyan
+        Write-Host "다운로드: Actions → Artifacts 에서 확인" -ForegroundColor Yellow
+        Write-Host "===============================================" -ForegroundColor Cyan
