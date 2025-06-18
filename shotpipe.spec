@@ -103,13 +103,21 @@ a = Analysis(
         
         # 외부 라이브러리 - Windows 호환성
         'shotgun_api3',
+        'shotgun_api3.shotgun',
         'dotenv',
         'exifread',
         'PIL',
         'PIL.Image',
         'PIL.ImageTk',
+        'PIL.ImageDraw',
+        'PIL.ImageFont',
         'yaml',
+        'yaml.loader',
+        'yaml.dumper',
         'markdown',
+        'markdown.extensions',
+        'pkg_resources',
+        'pkg_resources.py2_warn',
         
         # Windows 시스템 관련
         'platform',

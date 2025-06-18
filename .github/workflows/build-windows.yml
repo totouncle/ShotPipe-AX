@@ -44,14 +44,51 @@ jobs:
           ${{ runner.os }}-pip-
         
     - name: 🔧 Python 의존성 설치
+      shell: pwsh
       run: |
+        Write-Host "Upgrading pip and essential tools..." -ForegroundColor Yellow
         python -m pip install --upgrade pip setuptools wheel
-        echo "Installing requirements..."
-        pip install -r requirements.txt
-        echo "Installing PyInstaller..."
+        
+        Write-Host "`nInstalling requirements..." -ForegroundColor Yellow
+        pip install -r requirements.txt --verbose
+        
+        Write-Host "`nInstalling PyInstaller..." -ForegroundColor Yellow
         pip install pyinstaller[encryption]
-        echo "Verifying installations..."
-        pip list | findstr -i "pyqt5 pyinstaller shotgun"
+        
+        Write-Host "`nVerifying critical installations..." -ForegroundColor Yellow
+        $criticalPackages = @("pyqt5", "pyinstaller", "shotgun-api3", "pyyaml", "pillow")
+        foreach ($package in $criticalPackages) {
+            try {
+                $result = pip show $package 2>$null
+                if ($result) {
+                    Write-Host "✅ $package installed" -ForegroundColor Green
+                } else {
+                    Write-Host "❌ $package missing" -ForegroundColor Red
+                    throw "$package not found"
+                }
+            } catch {
+                Write-Host "❌ Error checking $package : $_" -ForegroundColor Red
+                exit 1
+            }
+        }
+        
+        Write-Host "`nTesting Python imports..." -ForegroundColor Yellow
+        python -c "
+import sys
+print(f'Python version: {sys.version}')
+
+# Test critical imports
+modules = ['PyQt5', 'PyQt5.QtWidgets', 'yaml', 'PIL', 'dotenv', 'shotgun_api3']
+for module in modules:
+    try:
+        __import__(module)
+        print(f'✅ {module}')
+    except ImportError as e:
+        print(f'❌ {module}: {e}')
+        sys.exit(1)
+        
+print('All imports successful!')
+"
         
     - name: 🏗️ NSIS 설치
       run: |
