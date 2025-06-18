@@ -16,9 +16,9 @@ datas = []
 shotpipe_path = os.path.join(current_dir, 'shotpipe')
 if os.path.exists(shotpipe_path):
     datas.append((shotpipe_path, 'shotpipe'))
-    print(f"✅ Found shotpipe module at: {shotpipe_path}")
+    print(f"[OK] Found shotpipe module at: {shotpipe_path}")
 else:
-    print(f"❌ shotpipe module not found at: {shotpipe_path}")
+    print(f"[ERROR] shotpipe module not found at: {shotpipe_path}")
 
 # 필수 문서 파일들만 포함 (용량 최적화)
 essential_docs = [
@@ -31,23 +31,23 @@ for doc_file in essential_docs:
     doc_path = os.path.join(current_dir, doc_file)
     if os.path.exists(doc_path):
         datas.append((doc_path, '.'))
-        print(f"✅ Found document: {doc_file}")
+        print(f"[OK] Found document: {doc_file}")
     else:
-        print(f"⚠️  Document not found: {doc_file}")
+        print(f"[WARN] Document not found: {doc_file}")
 
 # Vendor 폴더 - ExifTool만 포함 (용량 최적화)
 vendor_path = os.path.join(current_dir, 'vendor')
 if os.path.exists(vendor_path):
     datas.append((vendor_path, 'vendor'))
-    print(f"✅ Found vendor directory: {vendor_path}")
+    print(f"[OK] Found vendor directory: {vendor_path}")
 
 # .env 예제 파일 포함
 env_example_path = os.path.join(current_dir, '.env.example')
 if os.path.exists(env_example_path):
     datas.append((env_example_path, '.'))
-    print(f"✅ Found .env.example: {env_example_path}")
+    print(f"[OK] Found .env.example: {env_example_path}")
 
-print(f"Total data files to include: {len(datas)}")
+print(f"[INFO] Total data files to include: {len(datas)}")
 
 # Analysis 설정 - Windows 환경 최적화
 a = Analysis(
@@ -195,7 +195,7 @@ a = Analysis(
 )
 
 # 용량 최적화를 위한 바이너리 필터링 - Windows 호환성 개선
-print("Filtering binaries for optimization...")
+print("[INFO] Filtering binaries for optimization...")
 initial_count = len(a.binaries)
 
 # 불필요한 바이너리 제거
@@ -219,7 +219,7 @@ for binary in a.binaries:
         filtered_binaries.append(binary)
 
 a.binaries = filtered_binaries
-print(f"Binary filtering: {initial_count} → {len(a.binaries)} files ({initial_count - len(a.binaries)} removed)")
+print(f"[INFO] Binary filtering: {initial_count} -> {len(a.binaries)} files ({initial_count - len(a.binaries)} removed)")
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
@@ -229,7 +229,7 @@ for icon_name in ['shotpipe.ico', 'icon.ico', 'app.ico']:
     icon_full_path = os.path.join(current_dir, icon_name)
     if os.path.exists(icon_full_path):
         icon_path = icon_full_path
-        print(f"✅ Found icon: {icon_name}")
+        print(f"[OK] Found icon: {icon_name}")
         break
 
 # 버전 정보 파일 경로 확인  
@@ -237,14 +237,14 @@ version_path = None
 version_full_path = os.path.join(current_dir, 'version_info.txt')
 if os.path.exists(version_full_path):
     version_path = version_full_path
-    print(f"✅ Found version info: version_info.txt")
+    print(f"[OK] Found version info: version_info.txt")
 
 # 매니페스트 파일 경로 확인
 manifest_path = None
 manifest_full_path = os.path.join(current_dir, 'ShotPipe.manifest')
 if os.path.exists(manifest_full_path):
     manifest_path = manifest_full_path
-    print(f"✅ Found manifest: ShotPipe.manifest")
+    print(f"[OK] Found manifest: ShotPipe.manifest")
 
 exe = EXE(
     pyz,
