@@ -36,12 +36,16 @@ UninstallIcon "${ICON_FILE}"
 
 ; 모던 UI 설정
 !define MUI_ABORTWARNING
-!define MUI_ICON "shotpipe.ico"
-!define MUI_UNICON "shotpipe.ico"
+; 아이콘 파일이 없으므로 주석 처리 (기본 아이콘 사용)
+;!define MUI_ICON "shotpipe.ico"
+;!define MUI_UNICON "shotpipe.ico"
 
 ; 인스톨러 페이지
 !insertmacro MUI_PAGE_WELCOME
-!insertmacro MUI_PAGE_LICENSE "LICENSE.txt"
+; 라이센스 파일이 있으면 표시, 없으면 건너뛰기
+!ifdef LICENSE_FILE
+!insertmacro MUI_PAGE_LICENSE "${LICENSE_FILE}"
+!endif
 !insertmacro MUI_PAGE_COMPONENTS
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
