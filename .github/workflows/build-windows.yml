@@ -179,8 +179,9 @@ jobs:
         if (Test-Path "WINDOWS_USER_GUIDE.md") { Copy-Item "WINDOWS_USER_GUIDE.md" "ShotPipe_Portable\" -Force }
         Write-Host "Creating zip archive..."
         $version = "${{ github.event.inputs.version || 'v1.3.0' }}"
-        Compress-Archive -Path "ShotPipe_Portable" -DestinationPath "ShotPipe_${version}_Portable.zip" -Force
-        Write-Host "Portable version created: ShotPipe_${version}_Portable.zip"
+        $zipName = "ShotPipe_" + $version + "_Portable.zip"
+        Compress-Archive -Path "ShotPipe_Portable" -DestinationPath $zipName -Force
+        Write-Host "Portable version created: $zipName"
         
     - name: 📤 빌드 결과물 업로드
       uses: actions/upload-artifact@v4
