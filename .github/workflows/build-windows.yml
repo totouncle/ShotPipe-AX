@@ -73,7 +73,7 @@ jobs:
         }
         
         Write-Host "`nTesting Python imports..." -ForegroundColor Yellow
-        python -c "
+        python -c @"
 import sys
 print(f'Python version: {sys.version}')
 
@@ -82,13 +82,13 @@ modules = ['PyQt5', 'PyQt5.QtWidgets', 'yaml', 'PIL', 'dotenv', 'shotgun_api3']
 for module in modules:
     try:
         __import__(module)
-        print(f'✅ {module}')
+        print(f'[OK] {module}')
     except ImportError as e:
-        print(f'❌ {module}: {e}')
+        print(f'[ERROR] {module}: {e}')
         sys.exit(1)
         
-print('All imports successful!')
-"
+print('[INFO] All imports successful!')
+"@
         
     - name: 🏗️ NSIS 설치
       run: |
