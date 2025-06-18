@@ -18,11 +18,7 @@ from ..shotgrid.entity_manager import EntityManager
 from ..shotgrid.uploader import Uploader
 from ..config import config
 from dotenv import load_dotenv
-try:
-    from ..utils.history_manager import UploadHistoryManager
-except ImportError:
-    # 절대 경로로 시도
-    from shotpipe.utils.history_manager import UploadHistoryManager
+from ..utils.history_manager import UploadHistoryManager
 
 # .env 파일 로드
 load_dotenv()
@@ -636,13 +632,13 @@ class ShotgridTab(QWidget):
                 # 프로젝트 콤보박스에 해당 프로젝트가 있는지 확인 후 설정
                 if self.project_combo.findText(project_name) != -1:
                     self.project_combo.setCurrentText(project_name)
-            else:
+                else:
                     # 없으면 추가하고 설정
                     self.project_combo.addItem(project_name)
                     self.project_combo.setCurrentText(project_name)
             
         self.processed_files = file_infos
-            self.update_files_table()
+        self.update_files_table()
         self.upload_button.setEnabled(bool(self.processed_files))
         QMessageBox.information(self, "성공", f"{len(file_infos)}개의 처리된 파일을 로드했습니다.")
         

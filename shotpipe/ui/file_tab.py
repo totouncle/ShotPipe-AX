@@ -29,36 +29,91 @@ from ..ui.styles.dark_theme import get_color_palette
 
 logger = logging.getLogger(__name__)
 
-class SequenceShotDelegate(QStyledItemDelegate):
-    """시퀀스와 샷 컬럼용 커스텀 드롭다운 에디터"""
+class CellEditorDelegate(QStyledItemDelegate):
+    """
+    테이블 셀 편집을 위한 커스텀 델리게이트.
+    컬럼에 따라 QComboBox 또는 QLineEdit를 에디터로 제공합니다.
+    """
     
     def __init__(self, parent_tab):
         super().__init__()
         self.parent_tab = parent_tab
     
     def createEditor(self, parent, option, index):
-        """에디터 생성 - QComboBox 드롭다운"""
-        if index.column() not in [3, 4]:  # 시퀀스(3), 샷(4) 컬럼만
-            return super().createEditor(parent, option, index)
+        """컬럼 유형에 따라 적절한 편집 위젯을 생성합니다."""
         
-        combo = QComboBox(parent)
-        combo.setEditable(True)
-        combo.setInsertPolicy(QComboBox.NoInsert)
-        
-        # 폰트 설정
-        font = self.parent_tab.file_table.font()
-        combo.setFont(font)
+        # 시퀀스(3) 또는 샷(4) 컬럼인 경우 QComboBox 생성
+        if index.column() in [3, 4]:
+            combo = QComboBox(parent)
+            combo.setEditable(True)
+            combo.setInsertPolicy(QComboBox.NoInsert)
+            combo.setMinimumWidth(120)
+            combo.setStyleSheet("""
+                QComboBox { 
+                    border: 1px solid #777; padding: 2px; background-color: #333;
+                }
+                QComboBox::drop-down {
+                    subcontrol-origin: padding; subcontrol-position: top right;
+                    width: 15px; border-left-width: 1px;
+                    border-left-color: #777; border-left-style: solid;
+                }
+            """)
+            
+            font = self.parent_tab.file_table.font()
+            combo.setFont(font)
 
-        # 드롭다운 리스트 뷰의 폰트 설정
-        list_view = QListView(combo)
-        list_view.setFont(font)
-        list_view.setWordWrap(True) # 긴 텍스트 줄 바꿈
-        combo.setView(list_view)
+            list_view = QListView(combo)
+            list_view.setFont(font)
+            list_view.setWordWrap(True)
+            combo.setView(list_view)
+            
+            self._populate_combo_data(combo, index)
+            return combo
+
+        # 그 외 편집 가능한 모든 컬럼(예: 메시지)은 QLineEdit 생성
+        else:
+            editor = QLineEdit(parent)
+            editor.setFont(option.font)
+            editor.setStyleSheet("""
+                QLineEdit {
+                    border: 1px solid #999;
+                    padding: 1px;
+                    background-color: #2E2E2E;
+                    color: #E0E0E0;
+                }
+            """)
+            return editor
+    
+    def setEditorData(self, editor, index):
+        """에디터에 현재 셀의 데이터를 설정합니다."""
+        current_value = index.model().data(index, Qt.DisplayRole)
         
-        # 데이터 로드
-        self._populate_combo_data(combo, index)
-        
-        return combo
+        if isinstance(editor, QComboBox):
+            if current_value:
+                combo_index = editor.findText(current_value)
+                if combo_index >= 0:
+                    editor.setCurrentIndex(combo_index)
+                else:
+                    editor.setEditText(current_value)
+        elif isinstance(editor, QLineEdit):
+            editor.setText(str(current_value))
+        else:
+            super().setEditorData(editor, index)
+
+    def setModelData(self, editor, model, index):
+        """에디터의 데이터를 모델(테이블 셀)에 저장합니다."""
+        if isinstance(editor, QComboBox):
+            value = editor.currentText()
+            if value and value not in ["-- 시퀀스 선택 --", "-- Shot 선택 --"]:
+                model.setData(index, value, Qt.EditRole)
+        elif isinstance(editor, QLineEdit):
+            model.setData(index, editor.text(), Qt.EditRole)
+        else:
+            super().setModelData(editor, model, index)
+
+    def updateEditorGeometry(self, editor, option, index):
+        """모든 에디터의 위치와 크기를 셀에 정확히 맞춥니다."""
+        editor.setGeometry(option.rect)
     
     def _populate_combo_data(self, combo, index):
         """콤보박스에 데이터 채우기"""
@@ -164,30 +219,6 @@ class SequenceShotDelegate(QStyledItemDelegate):
                 combo.addItem(shot)
         
         logger.debug(f"Shot 콤보박스에 {len(unique_shots)}개 항목 로드됨")
-    
-    def setEditorData(self, editor, index):
-        """에디터에 현재 값 설정"""
-        if not isinstance(editor, QComboBox):
-            return super().setEditorData(editor, index)
-        
-        current_value = index.model().data(index, Qt.DisplayRole)
-        if current_value:
-            # 현재 값이 콤보박스에 있으면 선택
-            combo_index = editor.findText(current_value)
-            if combo_index >= 0:
-                editor.setCurrentIndex(combo_index)
-            else:
-                # 없으면 직접 입력된 값으로 설정
-                editor.setEditText(current_value)
-    
-    def setModelData(self, editor, model, index):
-        """에디터의 값을 모델에 저장"""
-        if not isinstance(editor, QComboBox):
-            return super().setModelData(editor, model, index)
-        
-        value = editor.currentText()
-        if value and value not in ["-- 시퀀스 선택 --", "-- Shot 선택 --"]:
-            model.setData(index, value, Qt.EditRole)
 
 # Shotgrid 연동을 위한 import 추가
 try:
@@ -204,7 +235,7 @@ class FileTab(QWidget):
     # Signal to notify when files have been processed
     files_processed = pyqtSignal(list)
     
-    def __init__(self, parent=None):
+    def __init__(self, processed_files_tracker, parent=None):
         """Initialize the file tab."""
         super().__init__(parent)
         self.parent = parent
@@ -214,12 +245,12 @@ class FileTab(QWidget):
         self.file_info_dict = {}
         self.sequence_dict = {}
         self.processing_thread = None
-        self.scanner = FileScanner()
-        self.metadata_extractor = MetadataExtractor()
-        self.processed_files_tracker = ProcessedFilesTracker()  # 초기화
         
-        # 스캐너에 ProcessedFilesTracker 설정
+        # 스캐너 초기화 및 트래커 주입
+        self.processed_files_tracker = processed_files_tracker
+        self.scanner = FileScanner()
         self.scanner.processed_files_tracker = self.processed_files_tracker
+        self.metadata_extractor = MetadataExtractor()
         
         self.skipped_files = []  # 초기화
         
@@ -236,8 +267,8 @@ class FileTab(QWidget):
             try:
                 self.shotgrid_connector = ShotgridConnector()
                 if self.shotgrid_connector.sg:
-                self.shotgrid_entity_manager = EntityManager(self.shotgrid_connector)
-                logger.info(f"Shotgrid 연동 초기화 성공 - 고정 프로젝트: {self.fixed_project_name}")
+                    self.shotgrid_entity_manager = EntityManager(self.shotgrid_connector)
+                    logger.info(f"Shotgrid 연동 초기화 성공 - 고정 프로젝트: {self.fixed_project_name}")
                 else:
                     logger.warning("Shotgrid 연결에 실패하여 Entity Manager를 생성하지 않았습니다.")
                     self.shotgrid_connector = None
@@ -588,9 +619,8 @@ class FileTab(QWidget):
             self.file_table.sortItems(2, Qt.AscendingOrder)
             self.file_table.itemChanged.connect(self._on_table_item_changed)
             
-            self.sequence_shot_delegate = SequenceShotDelegate(self)
-            self.file_table.setItemDelegateForColumn(3, self.sequence_shot_delegate)
-            self.file_table.setItemDelegateForColumn(4, self.sequence_shot_delegate)
+            self.cell_editor_delegate = CellEditorDelegate(self)
+            self.file_table.setItemDelegate(self.cell_editor_delegate)
             
             self.file_table.setSelectionBehavior(QTableWidget.SelectRows)
             self.file_table.setEditTriggers(QAbstractItemView.DoubleClicked)
@@ -642,7 +672,6 @@ class FileTab(QWidget):
                 self.update_sequence_combo_from_directory(self.source_directory)
         else:
             self.sequence_combo.setCurrentIndex(0)
-
     def on_sequence_changed(self, text):
         if text and text != "자동 감지":
             if hasattr(self, 'update_recent_sequence'):
@@ -830,12 +859,6 @@ class FileTab(QWidget):
     
     def scan_files(self):
         try:
-            if hasattr(self.parent, 'app') and hasattr(self.parent.app, 'processed_files_tracker'):
-                self.processed_files_tracker = self.parent.app.processed_files_tracker
-                logger.debug("부모 앱의 ProcessedFilesTracker 인스턴스 사용")
-            elif self.processed_files_tracker is None:
-                self.processed_files_tracker = ProcessedFilesTracker()
-                logger.debug("ProcessedFilesTracker 인스턴스 새로 생성")
             if not self.source_directory:
                 directory = QFileDialog.getExistingDirectory(
                     self, "소스 폴더 선택", os.path.expanduser("~"),
@@ -931,12 +954,7 @@ class FileTab(QWidget):
                 for seq_name in sorted(sequence_names):
                     self.add_sequence_if_not_exists(seq_name)
             self._update_file_display()
-            self.progress_bar.setRange(0, 100)
-            self.progress_bar.setValue(0)
-            self.progress_bar.setVisible(False)
-            self.scan_btn.setEnabled(True)
-            self.scan_btn.setText("파일 스캔")
-            self.process_btn.setEnabled(True if file_list else False)
+            
             processed_files = self.processed_files_tracker.get_processed_files_in_directory(self.source_directory)
             processed_count = len(processed_files) if processed_files else 0
             unprocessed_count = len(self.file_list)
@@ -945,38 +963,71 @@ class FileTab(QWidget):
             QMessageBox.information(self, "스캔 완료", status_message)
         except Exception as e:
             logger.error(f"Error handling scan completion: {e}", exc_info=True)
-            
+            QMessageBox.critical(self, "오류", f"스캔 결과 처리 중 오류가 발생했습니다: {e}")
+        finally:
+            self.progress_bar.setRange(0, 100)
+            self.progress_bar.setValue(0)
+            self.progress_bar.setVisible(False)
+            self.scan_btn.setEnabled(True)
+            self.scan_btn.setText("파일 스캔")
+            self.process_btn.setEnabled(bool(self.file_list))
+
     def _update_file_display(self):
         try:
             self.file_table.setSortingEnabled(False)
             self.file_table.setUpdatesEnabled(False)
+            
             current_filter = self.filter_combo.currentData()
             search_text = self.search_edit.text().lower()
+            
+            # 표시할 소스 리스트 결정
             if self.all_files_radio.isChecked():
                 source_list = self.file_list + self.skipped_files
             elif self.skipped_files_radio.isChecked():
                 source_list = self.skipped_files
-                    else:
+            else: # 유효 파일
                 source_list = self.file_list
+
+            # 스킵된 파일 경로를 Set으로 만들어 빠른 조회를 지원
+            skipped_paths = {f.get('file_path') for f in self.skipped_files if f.get('file_path')}
+
             files_to_show = []
             for item in source_list:
+                # item이 dict가 아닌 경우를 대비
                 if isinstance(item, str):
-                    file_info = self.file_info_dict.get(item, {"file_name": item, "full_path": os.path.join(self.source_directory, item)})
-                    else:
+                    file_info = self.file_info_dict.get(item, {"file_name": item, "file_path": os.path.join(self.source_directory, item)})
+                else:
                     file_info = item
+                
+                # 검색어 필터링
                 if search_text and search_text not in file_info.get("file_name", "").lower():
                     continue
-                is_processed = self.processed_files_tracker.is_file_processed(file_info.get('full_path', ''))
+                
+                # 처리 상태 필터링
+                is_processed = self.processed_files_tracker.is_file_processed(file_info.get('file_path', ''))
                 if current_filter == "processed" and not is_processed:
                     continue
                 if current_filter == "unprocessed" and is_processed:
                     continue
+                
                 files_to_show.append(file_info)
+
             self.file_table.setRowCount(len(files_to_show))
+
             for row, file_info in enumerate(files_to_show):
-                full_path = file_info.get("full_path", "")
+                full_path = file_info.get("file_path", "")
+                
+                # 상태 결정 (처리됨 > 스킵됨 > 대기)
                 is_processed = self.processed_files_tracker.is_file_processed(full_path)
-                status_text = "✓ 처리됨" if is_processed else "대기"
+                is_skipped = full_path in skipped_paths
+
+                status_text = "대기"
+                if is_skipped:
+                    status_text = "스킵"
+                if is_processed:
+                    status_text = "✓ 처리됨"
+
+                # 체크박스 위젯 생성
                 check_box_widget = QWidget()
                 check_box_layout = QHBoxLayout(check_box_widget)
                 check_box = QCheckBox()
@@ -984,257 +1035,245 @@ class FileTab(QWidget):
                 check_box_layout.setAlignment(Qt.AlignCenter)
                 check_box_layout.setContentsMargins(0, 0, 0, 0)
                 self.file_table.setCellWidget(row, 0, check_box_widget)
-                check_box.setChecked(not is_processed and "스킵" not in status_text)
+                
+                # 처리되지 않았고 스킵되지 않은 "유효 파일"만 기본으로 체크합니다.
+                check_box.setChecked(not is_processed and not is_skipped)
+
+                # 나머지 셀 데이터 채우기
                 self.file_table.setItem(row, 1, QTableWidgetItem(file_info.get("file_name", "")))
                 status_item = QTableWidgetItem(status_text)
                 self.file_table.setItem(row, 2, status_item)
-                sequence = file_info.get("sequence", "")
-                sequence_item = QTableWidgetItem(sequence)
-                self.file_table.setItem(row, 3, sequence_item)
-                shot = file_info.get("shot", "")
-                shot_item = QTableWidgetItem(shot)
-                self.file_table.setItem(row, 4, shot_item)
+                self.file_table.setItem(row, 3, QTableWidgetItem(file_info.get("sequence", "")))
+                self.file_table.setItem(row, 4, QTableWidgetItem(file_info.get("shot", "")))
+                
                 elapsed_time = file_info.get("elapsed_time")
                 time_item = QTableWidgetItem(f"{elapsed_time:.2f}s" if elapsed_time is not None else "")
                 self.file_table.setItem(row, 5, time_item)
+                
                 message = file_info.get("message", "")
-                message_item = QTableWidgetItem(message)
-                self.file_table.setItem(row, 6, message_item)
+                self.file_table.setItem(row, 6, QTableWidgetItem(message))
+                
+                # 상태에 따라 행 스타일 적용
                 self._style_table_row(row, is_processed, status_text)
+
+        except Exception as e:
+            logger.error(f"Failed to update file display: {e}", exc_info=True)
         finally:
             self.file_table.setUpdatesEnabled(True)
             self.file_table.setSortingEnabled(True)
             self._update_file_info_label()
-            
+
     def _style_table_row(self, row, is_processed, status_text):
-        palette = get_color_palette()
-        editable_bg_color = QColor(palette.get("selection_bg", "#4C566A"))
-        processed_color = QColor(palette.get("success", "#A3BE8C"))
-        unprocessed_color = QColor(palette.get("warning", "#D08770"))
-        error_color = QColor(palette.get("error", "#BF616A"))
-        sequence_item = self.file_table.item(row, 3)
-        shot_item = self.file_table.item(row, 4)
-        if sequence_item:
-            sequence_item.setBackground(editable_bg_color)
-            sequence_item.setToolTip("더블클릭하여 시퀀스를 선택하거나 직접 입력하세요.")
-        if shot_item:
-            shot_item.setBackground(editable_bg_color)
-            shot_item.setToolTip("더블클릭하여 샷을 선택하거나 직접 입력하세요.")
-        color_to_apply = unprocessed_color
-        if status_text == "✓ 처리됨":
-            color_to_apply = processed_color
-        elif "오류" in status_text or "스킵" in status_text:
-            color_to_apply = error_color
-        for col in range(1, self.file_table.columnCount()):
-            item = self.file_table.item(row, col)
-            if item:
-                item.setForeground(QBrush(color_to_apply))
-    
+        if is_processed:
+            color = QColor("#5A5A5A")  # Dark gray for processed files
+            font = self.file_table.item(row, 1).font()
+            font.setItalic(True)
+            for col in range(1, self.file_table.columnCount()):
+                item = self.file_table.item(row, col)
+                if item:
+                    item.setForeground(QColor("gray"))
+                    item.setFont(font)
+        elif "스킵" in status_text:
+            reason = self.file_info_dict.get(self.file_table.item(row, 1).text(), {}).get("skip_reason")
+            display_text, color_name = self._get_skip_reason_display(reason)
+            color = QColor(color_name)
+            for col in range(1, self.file_table.columnCount()):
+                item = self.file_table.item(row, col)
+                if item:
+                    item.setBackground(color)
+                    item.setToolTip(f"스킵된 이유: {display_text}")
+            status_item = self.file_table.item(row, 2)
+            if status_item:
+                status_item.setText(f"스킵됨 ({display_text})")
+        else:
+            for col in range(1, self.file_table.columnCount()):
+                item = self.file_table.item(row, col)
+                if item:
+                    item.setBackground(QColor("transparent"))
+                    item.setForeground(QColor(get_color_palette()['text_primary']))
+                    font = item.font()
+                    font.setItalic(False)
+                    item.setFont(font)
+                    item.setToolTip("")
+
     def process_files(self):
         try:
-            if hasattr(self.parent, 'app') and hasattr(self.parent.app, 'processed_files_tracker'):
-                self.processed_files_tracker = self.parent.app.processed_files_tracker
-                logger.debug("process_files에서 부모 앱의 ProcessedFilesTracker 인스턴스 사용")
-            elif self.processed_files_tracker is None:
-                self.processed_files_tracker = ProcessedFilesTracker()
-                logger.debug("process_files에서 ProcessedFilesTracker 인스턴스 새로 생성")
-            if not self.source_directory or not os.path.isdir(self.source_directory):
-                QMessageBox.warning(self, "경고", "유효한 소스 디렉토리를 선택해주세요.")
-                return
             selected_files = self.get_selected_files()
             if not selected_files:
-                QMessageBox.warning(self, "경고", "처리할 파일을 선택해주세요.")
+                QMessageBox.warning(self, "경고", "처리할 파일을 선택하세요.")
                 return
-            logger.info(f"Processing {len(selected_files)} selected files")
-            if not self.output_directory:
-                self.output_directory = self.source_directory
-            selected_sequence = None
-            if self.use_sequence_cb.isChecked():
-                selected_text = self.sequence_combo.currentText()
-                if selected_text != "자동 감지":
-                    selected_sequence = selected_text
             self.progress_bar.setVisible(True)
-            self.process_btn.setText("처리 중지")
-            self.process_btn.clicked.disconnect()
-            self.process_btn.clicked.connect(self.cancel_processing)
-            self.scan_btn.setEnabled(False)
-            for i in range(self.file_table.rowCount()):
-                check_box = self.file_table.cellWidget(i, 0).findChild(QCheckBox)
-                if check_box and check_box.isChecked():
-                    self.file_table.setItem(i, 2, QTableWidgetItem("대기중"))
-                    self.file_table.setItem(i, 6, QTableWidgetItem(""))
-            if self.create_processed_folder_cb.isChecked():
-                output_dir = os.path.join(self.output_directory, "processed")
-            else:
-                output_dir = self.output_directory
+            self.process_btn.setEnabled(False)
+            self.process_btn.setText("처리 중...")
+            output_dir = self.output_edit.text() or self.source_directory
+            create_processed_folder = self.create_processed_folder_cb.isChecked()
+            naming_options = {
+                "use_sequence": self.use_sequence_cb.isChecked(),
+                "sequence": self.sequence_combo.currentText(),
+            }
+            if self.processing_thread and self.processing_thread.isRunning():
+                self.processing_thread.stop()
             self.processing_thread = ProcessingThread(
                 selected_files,
                 self.metadata_extractor,
-                sequence_dict=self.sequence_dict,
-                selected_sequence=selected_sequence,
                 output_directory=output_dir,
                 processed_files_tracker=self.processed_files_tracker
             )
+            # 진도바 범위 설정
+            self.progress_bar.setRange(0, len(selected_files))
+            self.progress_bar.setValue(0)
+            
             self.processing_thread.progress_updated.connect(self.update_progress)
             self.processing_thread.file_processed.connect(self.update_file_status)
             self.processing_thread.processing_completed.connect(self.processing_completed)
             self.processing_thread.processing_error.connect(self.processing_error)
-            logger.info("Starting file processing thread...")
             self.processing_thread.start()
         except Exception as e:
             logger.error(f"Error starting file processing: {e}", exc_info=True)
-            QMessageBox.critical(self, "오류", f"파일 처리 시작 중 오류가 발생했습니다: {str(e)}")
-    
+            QMessageBox.critical(self, "오류", f"파일 처리 시작 중 오류: {str(e)}")
+            self.process_btn.setEnabled(True)
+            self.process_btn.setText("처리 시작")
+
     def cancel_processing(self):
         if self.processing_thread and self.processing_thread.isRunning():
-            logger.info("Canceling file processing")
-            self.processing_thread.cancel = True
-            self.process_btn.setEnabled(False)
-            self.process_btn.setText("취소 중...")
-    
+            self.processing_thread.stop()
+            logger.info("File processing cancelled by user.")
+            QMessageBox.information(self, "취소됨", "파일 처리가 중단되었습니다.")
+
     @pyqtSlot(int, int)
-    def update_progress(self, value, total):
-        self.progress_bar.setRange(0, total)
+    @pyqtSlot(int)
+    def update_progress(self, value):
         self.progress_bar.setValue(value)
-    
+
     @pyqtSlot(str, str, str, str, str, float)
     def update_file_status(self, file_name, status, sequence, shot, message, elapsed_time):
         for row in range(self.file_table.rowCount()):
-            item = self.file_table.item(row, 1)
-            if item and item.text() == file_name:
+            if self.file_table.item(row, 1).text() == file_name:
                 self.file_table.setItem(row, 2, QTableWidgetItem(status))
                 self.file_table.setItem(row, 3, QTableWidgetItem(sequence))
                 self.file_table.setItem(row, 4, QTableWidgetItem(shot))
-                time_str = f"{elapsed_time:.2f}s" if elapsed_time > 0 else ""
-                self.file_table.setItem(row, 5, QTableWidgetItem(time_str))
+                self.file_table.setItem(row, 5, QTableWidgetItem(f"{elapsed_time:.2f}s"))
                 self.file_table.setItem(row, 6, QTableWidgetItem(message))
-                is_processed = (status == "완료")
+                is_processed = "완료" in status or "성공" in status
                 self._style_table_row(row, is_processed, status)
+                if is_processed:
+                    full_path = self.file_info_dict.get(file_name, {}).get("file_path", "")
+                    if full_path:
+                        self.processed_files_tracker.add_processed_file(full_path, {"status": status})
                 break
-    
+
     @pyqtSlot(list)
     def processing_completed(self, processed_files):
-        try:
-            self.progress_bar.setValue(self.progress_bar.maximum())
-            self.process_btn.setText("처리 시작")
-            self.process_btn.clicked.disconnect()
-            self.process_btn.clicked.connect(self.process_files)
-            self.scan_btn.setEnabled(True)
-            success_count = len([f for f in processed_files if f.get("success", False)])
-            selected_files_count = len(processed_files)
-            logger.info(f"Processing completed: {success_count}/{selected_files_count} files processed successfully")
-            self._update_file_display()
-            converted_files = self._convert_files_for_shotgrid(processed_files)
-            if converted_files:
-                self.files_processed.emit(converted_files)
-            QMessageBox.information(
-                self, "처리 완료", 
-                f"{selected_files_count}개 파일 중 {success_count}개가 성공적으로 처리되었습니다."
-            )
-        except Exception as e:
-            logger.error(f"Error handling processing completion: {e}", exc_info=True)
-            
+        self.progress_bar.setVisible(False)
+        self.process_btn.setEnabled(True)
+        self.process_btn.setText("처리 시작")
+        self.files_processed.emit(processed_files)
+        
+        QMessageBox.information(self, "완료", f"{len(processed_files)}개 파일 처리가 완료되었습니다.")
+        
+        if SHOTGRID_AVAILABLE and self.shotgrid_connector:
+            reply = QMessageBox.question(self, 'Shotgrid 업로드', 
+                                         '처리된 파일을 Shotgrid에 업로드하시겠습니까?',
+                                         QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
+            if reply == QMessageBox.Yes:
+                converted_files = self._convert_files_for_shotgrid(processed_files)
+                if converted_files:
+                    # Shotgrid 탭으로 파일 정보 전송
+                    if hasattr(self.parent, 'shotgrid_tab'):
+                        self.parent.shotgrid_tab.add_files_for_upload(converted_files)
+                        self.parent.tabs.setCurrentWidget(self.parent.shotgrid_tab)
+                        QMessageBox.information(self, "정보", "파일이 Shotgrid 탭으로 전송되었습니다. 내용을 확인 후 업로드 해주세요.")
+                    else:
+                        QMessageBox.warning(self, "경고", "Shotgrid 탭을 찾을 수 없습니다.")
+
     def _convert_files_for_shotgrid(self, processed_files):
-                converted_files = []
-                for file_info in processed_files:
-                    if file_info.get("success", False):
-                        converted_file = {
+        converted_files = []
+        for file_info in processed_files:
+            if file_info.get("success", False):
+                converted_file = {
                     "file_name": file_info.get("file_name", ""),
                     "file_path": file_info.get("file_path", ""),
-                    "processed_path": file_info.get("output_path", ""),
-                    "metadata_path": file_info.get("metadata_path", ""),
+                    "project": self.fixed_project_name,
                     "sequence": file_info.get("sequence", ""),
                     "shot": file_info.get("shot", ""),
                     "task": self._assign_task_automatically(file_info.get("output_path", "")),
                     "version": file_info.get("version", "v001"),
-                            "processed": True,
+                    "processed": True,
                     "metadata": file_info.get("metadata", {}),
                     "batch_path": file_info.get("batch_path", "")
-                        }
-                        converted_files.append(converted_file)
+                }
+                converted_files.append(converted_file)
         return converted_files
-    
+
     def on_shotgrid_project_changed(self, project_name):
-        if not project_name or project_name == "-- 프로젝트 선택 --" or not self.shotgrid_entity_manager:
-            return
-        try:
-            project = self.shotgrid_entity_manager.find_project(project_name)
-            if not project:
-                logger.warning(f"프로젝트 '{project_name}'을 찾을 수 없습니다")
-                return
-            sequences = self.shotgrid_entity_manager.get_sequences_in_project(project)
-            self.shotgrid_sequence_combo.clear()
-            self.shotgrid_sequence_combo.addItem("-- 시퀀스 선택 --")
-            for sequence in sequences:
-                self.shotgrid_sequence_combo.addItem(sequence['code'])
-            logger.info(f"프로젝트 '{project_name}'에서 {len(sequences)}개 시퀀스 로드됨")
-        except Exception as e:
-            logger.error(f"Shotgrid 프로젝트 변경 처리 중 오류: {e}")
+        self.fixed_project_name = project_name
+        self.shotgrid_project_label.setText(project_name)
+        if project_name and project_name != "-- 프로젝트 선택 --":
+            try:
+                project = self.shotgrid_entity_manager.find_project(project_name)
+                if project:
+                    sequences = self.shotgrid_entity_manager.get_sequences_in_project(project)
+                    self.shotgrid_sequence_combo.clear()
+                    self.shotgrid_sequence_combo.addItem("-- 시퀀스 선택 --")
+                    for seq in sequences:
+                        self.shotgrid_sequence_combo.addItem(seq['code'])
+            except Exception as e:
+                logger.error(f"Error loading sequences for project '{project_name}': {e}")
+                QMessageBox.warning(self, "오류", f"{project_name} 프로젝트의 시퀀스를 불러오는 데 실패했습니다.")
     
+    @pyqtSlot(dict)
+    def update_from_shotgrid_tab(self, info):
+        file_name = info.get('file_name')
+        if not file_name:
+            return
+        for row in range(self.file_table.rowCount()):
+            if self.file_table.item(row, 1).text() == file_name:
+                self.file_table.setItem(row, 2, QTableWidgetItem(info.get("status", "업로드됨")))
+                # Update other relevant columns if needed
+                break
+
     def scan_directory(self, directory=None, recursive=True, update_ui=True):
-        try:
-            if not directory:
-                directory = self.source_directory
-            if not directory or not os.path.isdir(directory):
-                logger.error(f"스캔할 디렉토리가 없음: {directory}")
-                if update_ui:
-                    self._update_file_info_label("유효한 디렉토리를 선택하세요")
-                return []
-            exclude_processed = self.exclude_processed_cb.isChecked()
-            recursive = self.recursive_cb.isChecked()
-            logger.info(f"디렉토리 스캔 시작: {directory} (recursive={recursive}, exclude_processed={exclude_processed})")
-            if update_ui:
-                self._update_file_info_label(f"스캔 중: {directory}...")
-            file_infos = self.scanner.scan_directory(directory, recursive, exclude_processed)
-            self.skipped_files = self.scanner.get_skipped_files()
-            self.file_list = [f for f in file_infos if f not in self.skipped_files]
-            for info in file_infos:
-                self.file_info_dict[info['file_name']] = info
-            self.sequence_dict = self.scanner.get_sequence_dict()
-            if self.sequence_dict:
-                for seq_name in self.sequence_dict.keys():
-                    self.add_sequence_if_not_exists(seq_name)
-            if update_ui:
-                self._update_file_display()
-            return file_infos
-        except Exception as e:
-            if update_ui:
-                self._update_file_info_label(f"스캔 오류: {e}")
-            logger.error(f"디렉토리 스캔 중 오류 발생: {e}", exc_info=True)
-            return []
+        if directory is None:
+            directory = self.source_directory
+        if not directory:
+            self.select_source_directory()
+            return
+        
+        start_time = time.time()
+        self.file_list, self.file_info_dict, self.sequence_dict, self.skipped_files = self.scanner.scan_directory(
+            directory, recursive, exclude_processed=self.exclude_processed_cb.isChecked()
+        )
+        elapsed_time = time.time() - start_time
+        
+        if update_ui:
+            self._update_file_display()
+            self.process_btn.setEnabled(len(self.file_list) > 0)
+            
+        logger.info(f"Scanned {directory} in {elapsed_time:.2f} seconds. Found {len(self.file_list)} files, skipped {len(self.skipped_files)}.")
 
     def _assign_task_automatically(self, file_path):
-        try:
-            if not file_path:
-                return "comp"
-            _, ext = os.path.splitext(file_path)
-            ext = ext.lower()
-            image_extensions = {'.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.tif', '.webp', '.exr', '.hdr'}
-            video_extensions = {'.mp4', '.mov', '.avi', '.mkv', '.webm', '.m4v', '.flv', '.wmv'}
-            if ext in image_extensions:
-                return "txtToImage"
-            elif ext in video_extensions:
-                return "imgToVideo"
-            else:
-                return "comp"
-        except Exception as e:
-            logger.error(f"자동 태스크 할당 중 오류 발생: {e}")
+        """파일 경로를 기반으로 Task를 자동으로 할당 (예시)"""
+        file_path_lower = file_path.lower()
+        if "comp" in file_path_lower:
             return "comp"
+        if "light" in file_path_lower or "lgt" in file_path_lower:
+            return "lighting"
+        if "fx" in file_path_lower:
+            return "fx"
+        if "ani" in file_path_lower or "anim" in file_path_lower:
+            return "animation"
+        return "comp" # 기본값
 
     def set_processed_files(self, processed_files):
-        for info in processed_files:
-            file_name = info.get("file_name") or os.path.basename(info.get("file_path", ""))
-            if not file_name:
-                continue
-        for row in range(self.file_table.rowCount()):
-                if self.file_table.item(row, 1).text() == file_name:
-                    self.file_table.setItem(row, 2, QTableWidgetItem(info.get("status", "업로드됨")))
-                    self._style_table_row(row, True, "업로드됨")
-                    check_box = self.file_table.cellWidget(row, 0).findChild(QCheckBox)
-                    if check_box:
-                        check_box.setChecked(False)
-                    break
-                    
+        """Sets the list of processed files from an external source (e.g., main app)."""
+        logger.debug(f"Received {len(processed_files)} processed files to update tracker.")
+        for file_path in processed_files:
+            file_info = {"status": "processed by other tab"}
+            self.processed_files_tracker.add_processed_file(file_path, file_info)
+        
+        # Refresh the UI to reflect changes
+        self._update_file_display()
+        
     def get_selected_files(self, ignore_checkbox_state=False):
         selected_files = []
         for row in range(self.file_table.rowCount()):
@@ -1245,43 +1284,46 @@ class FileTab(QWidget):
                     file_name = file_name_item.text()
                     file_info = self.file_info_dict.get(file_name, {}).copy()
                     if not file_info:
-                         file_info['full_path'] = os.path.join(self.source_directory, file_name)
-                         file_info['file_name'] = file_name
+                        file_info['file_path'] = os.path.join(self.source_directory, file_name)
+                        file_info['file_name'] = file_name
+                    
                     seq_item = self.file_table.item(row, 3)
                     shot_item = self.file_table.item(row, 4)
-                    if seq_item:
-                        file_info['sequence'] = seq_item.text()
-                    if shot_item:
-                        file_info['shot'] = shot_item.text()
+                    
+                    file_info['sequence'] = seq_item.text() if seq_item else ''
+                    file_info['shot'] = shot_item.text() if shot_item else ''
+                    
+                    # 태스크 정보가 테이블에 있다면 추가 (현재는 자동 할당)
+                    # 향후 태스크 컬럼이 추가되면 여기서 처리
+                    
                     selected_files.append(file_info)
         return selected_files
 
     def start_new_batch(self):
-        reply = QMessageBox.question(self, '새 배치 시작', 
-                                     "현재 파일 목록과 상태를 초기화하시겠습니까?",
-                                     QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-        if reply == QMessageBox.Yes:
-            self.reset_ui()
+        self.processed_files_tracker.start_new_batch()
+        self.reset_ui()
+        self.source_edit.clear()
+        self.output_edit.clear()
+        QMessageBox.information(self, "알림", "새로운 배치 작업을 시작합니다. 기존 처리 이력은 보존됩니다.")
 
     def filter_files(self):
         self._update_file_display()
-        
+
     def select_all_files(self, select):
         for row in range(self.file_table.rowCount()):
-            check_box = self.file_table.cellWidget(row, 0).findChild(QCheckBox)
-            if check_box:
-                check_box.setChecked(select)
-                
+            self.file_table.cellWidget(row, 0).findChild(QCheckBox).setChecked(select)
+            
     def toggle_all_checkboxes(self, checked):
-        pass
+        for row in range(self.file_table.rowCount()):
+            self.file_table.cellWidget(row, 0).findChild(QCheckBox).setChecked(checked)
 
     def select_unprocessed_files(self):
+        self.file_table.setSortingEnabled(False)
         for row in range(self.file_table.rowCount()):
             status_item = self.file_table.item(row, 2)
-            check_box = self.file_table.cellWidget(row, 0).findChild(QCheckBox)
-            if status_item and check_box:
-                is_processed = "처리됨" in status_item.text()
-                check_box.setChecked(not is_processed)
+            is_processed = status_item and ("완료" in status_item.text() or "성공" in status_item.text())
+            self.file_table.cellWidget(row, 0).findChild(QCheckBox).setChecked(not is_processed)
+        self.file_table.setSortingEnabled(True)
 
     def save_last_directory(self):
         try:
@@ -1291,7 +1333,7 @@ class FileTab(QWidget):
             with open(last_dir_file, "w") as f:
                 f.write(self.source_directory)
         except Exception as e:
-            logger.error(f"마지막 디렉토리 저장 실패: {e}")
+            logger.error(f"Failed to save last directory: {e}")
 
     def load_last_directory(self):
         try:
@@ -1300,129 +1342,168 @@ class FileTab(QWidget):
                 with open(last_dir_file, "r") as f:
                     last_dir = f.read().strip()
                     if os.path.isdir(last_dir):
-                    self.source_directory = last_dir
-                    self.source_edit.setText(last_dir)
+                        self.source_directory = last_dir
+                        self.source_edit.setText(last_dir)
                         self.output_directory = last_dir
-                    self.output_edit.setText(last_dir)
+                        self.output_edit.setText(last_dir)
                         QTimer.singleShot(100, self.scan_files)
         except Exception as e:
-            logger.error(f"마지막 디렉토리 로드 실패: {e}")
-            
+            logger.error(f"Failed to load last directory: {e}")
+
     def _update_file_info_label(self, message=None):
         if message:
             self.file_info_label.setText(message)
-                return
+            return
+        
         valid_count = len(self.file_list)
         skipped_count = len(self.skipped_files)
         total_count = valid_count + skipped_count
-        self.file_info_label.setText(
-            f"스캔된 총 파일: {total_count} (유효: {valid_count}, 스킵: {skipped_count})"
-        )
+        
+        selected_count = 0
+        for row in range(self.file_table.rowCount()):
+            widget = self.file_table.cellWidget(row, 0)
+            if widget and widget.findChild(QCheckBox) and widget.findChild(QCheckBox).isChecked():
+                selected_count += 1
+                
+        self.file_info_label.setText(f"총 {total_count}개 파일 발견 (유효: {valid_count}, 스킵: {skipped_count}) | 선택됨: {selected_count}개")
 
     def export_history(self):
         self.processed_files_tracker.export_history()
-        QMessageBox.information(self, "성공", f"처리 이력을 {self.processed_files_tracker.history_file_path} 에 저장했습니다.")
-    
+
     def show_history_stats(self):
-        stats = self.processed_files_tracker.get_stats()
-        stats_str = "\n".join([f"{key}: {value}" for key, value in stats.items()])
-        QMessageBox.information(self, "처리 이력 통계", stats_str)
-            
+        self.processed_files_tracker.show_stats_popup()
+
     def reset_history(self):
-        reply = QMessageBox.warning(self, "경고", "모든 처리 이력을 영구적으로 삭제하시겠습니까?",
-                                      QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        reply = QMessageBox.question(self, '이력 초기화 확인',
+                                     '정말로 모든 처리 이력을 초기화하시겠습니까?\n이 작업은 되돌릴 수 없습니다.',
+                                     QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
         if reply == QMessageBox.Yes:
+            # 1. 트래커의 이력을 리셋합니다.
             self.processed_files_tracker.reset_history()
-            QMessageBox.information(self, "성공", "처리 이력을 초기화했습니다.")
-            self._update_file_display()
             
+            # 2. 스캐너가 가진 트래커도 동일한 인스턴스를 사용하지만, 
+            #    만약을 위해 스캐너 내부 상태도 리셋하도록 지시합니다.
+            if hasattr(self, 'scanner'):
+                self.scanner.reset()
+            
+            # 3. FileTab의 파일 목록 관련 데이터도 초기화합니다.
+            self.file_list = []
+            self.skipped_files = []
+            self.file_info_dict = {}
+            self.sequence_dict = {}
+
+            # 4. UI를 새로고침하여 변경사항을 즉시 반영합니다.
+            self._update_file_display() 
+            QMessageBox.information(self, '완료', '모든 처리 이력이 초기화되었습니다. 다시 스캔을 진행해주세요.')
+
     def update_shotgrid_status(self):
-        if self.shotgrid_connector and self.shotgrid_connector.sg:
-            self.shotgrid_status_label.setText(f"✅ Shotgrid 연결됨 (사용자: {self.shotgrid_connector.get_user_info()})")
-            self.shotgrid_status_label.setStyleSheet("color: #2ECC71;")
-                else:
-            self.shotgrid_status_label.setText("❌ Shotgrid 연결 끊김")
-            self.shotgrid_status_label.setStyleSheet("color: #E74C3C;")
-    
+        if SHOTGRID_AVAILABLE and self.shotgrid_connector:
+            if self.shotgrid_connector.sg and self.shotgrid_connector.get_user_info():
+                self.shotgrid_status_label.setText(f"✅ Shotgrid 연결됨 (사용자: {self.shotgrid_connector.get_user_info()})")
+                self.shotgrid_status_label.setStyleSheet("color: #2ECC71;")
+            else:
+                self.shotgrid_status_label.setText("❌ Shotgrid 연결 끊김")
+                self.shotgrid_status_label.setStyleSheet("color: #E74C3C;")
+
     def auto_load_fixed_project(self):
-        if self.fixed_project_name:
-            self.on_shotgrid_project_changed(self.fixed_project_name)
-            
+        self.on_shotgrid_project_changed(self.fixed_project_name)
+
     def on_fixed_project_sequence_changed(self, sequence_name):
-        if not sequence_name or sequence_name == "-- 시퀀스 선택 --" or not self.shotgrid_entity_manager:
+        if sequence_name and sequence_name != "-- 시퀀스 선택 --":
+            try:
+                project = self.shotgrid_entity_manager.find_project(self.fixed_project_name)
+                if project:
+                    shots = self.shotgrid_entity_manager.get_shots_in_sequence(project, sequence_name)
+                    self.shotgrid_shot_combo.clear()
+                    self.shotgrid_shot_combo.addItem("-- Shot 선택 --")
+                    for shot in shots:
+                        self.shotgrid_shot_combo.addItem(shot['code'])
+            except Exception as e:
+                logger.error(f"Error loading shots for sequence '{sequence_name}': {e}")
+                QMessageBox.warning(self, "오류", f"시퀀스 '{sequence_name}'의 샷 목록을 불러오는 데 실패했습니다.")
+        else:
             self.shotgrid_shot_combo.clear()
-            self.shotgrid_shot_combo.addItem("-- 샷 선택 --")
-            return
-        try:
-            project = self.shotgrid_entity_manager.find_project(self.fixed_project_name)
-            if project:
-                shots = self.shotgrid_entity_manager.get_shots_in_sequence(project, sequence_name)
-                self.shotgrid_shot_combo.clear()
-                self.shotgrid_shot_combo.addItem("-- 샷 선택 --")
-                for shot in shots:
-                    self.shotgrid_shot_combo.addItem(shot['code'])
-                logger.info(f"시퀀스 '{sequence_name}'에서 {len(shots)}개 샷 로드됨")
-        except Exception as e:
-            logger.error(f"Shotgrid 샷 로드 중 오류: {e}")
-    
+            self.shotgrid_shot_combo.addItem("-- 시퀀스를 먼저 선택하세요 --")
+
     def refresh_shotgrid_data(self):
         QMessageBox.information(self, "새로고침", "Shotgrid 데이터를 새로고침합니다...")
-            self.auto_load_fixed_project()
+        self.auto_load_fixed_project()
         QMessageBox.information(self, "완료", "새로고침이 완료되었습니다.")
 
     def apply_shotgrid_to_selected(self):
-        selected_sequence = self.shotgrid_sequence_combo.currentText()
-        selected_shot = self.shotgrid_shot_combo.currentText()
-        if selected_sequence == "-- 시퀀스 선택 --":
-            QMessageBox.warning(self, "경고", "적용할 시퀀스를 선택해주세요.")
-            return
-        selected_rows = [self.file_table.cellWidget(r, 0).findChild(QCheckBox).isChecked() for r in range(self.file_table.rowCount())]
-        if not any(selected_rows):
-            QMessageBox.warning(self, "경고", "정보를 적용할 파일을 하나 이상 선택해주세요.")
-                return
+        sequence = self.shotgrid_sequence_combo.currentText()
+        shot = self.shotgrid_shot_combo.currentText()
+        
+        selected_rows = []
         for row in range(self.file_table.rowCount()):
             if self.file_table.cellWidget(row, 0).findChild(QCheckBox).isChecked():
-                self.file_table.setItem(row, 3, QTableWidgetItem(selected_sequence))
-                if selected_shot != "-- 샷 선택 --":
-                    self.file_table.setItem(row, 4, QTableWidgetItem(selected_shot))
-        QMessageBox.information(self, "성공", "선택된 파일에 시퀀스/샷 정보가 적용되었습니다.")
-    
-    def open_project_settings(self):
-        text, ok = QInputDialog.getText(self, '고정 프로젝트 설정', 'Shotgrid 프로젝트명을 입력하세요:', text=self.fixed_project_name)
-        if ok and text:
-            self.fixed_project_name = text
-            self.shotgrid_project_label.setText(text)
-            config.set('shotgrid', 'default_project', text)
-            config.save()
-            QMessageBox.information(self, "저장됨", "프로젝트 설정이 저장되었습니다. 데이터를 새로고침합니다.")
-            self.refresh_shotgrid_data()
+                selected_rows.append(row)
+        
+        if not any(selected_rows):
+            QMessageBox.warning(self, "경고", "정보를 적용할 파일을 하나 이상 선택해주세요.")
+            return
             
+        for row in range(self.file_table.rowCount()):
+            if self.file_table.cellWidget(row, 0).findChild(QCheckBox).isChecked():
+                if sequence and sequence != "-- 시퀀스 선택 --":
+                    self.file_table.item(row, 3).setText(sequence)
+                if shot and shot != "-- Shot 선택 --":
+                    self.file_table.item(row, 4).setText(shot)
+
+    def open_project_settings(self):
+        from ..ui.project_settings_dialog import ProjectSettingsDialog
+        
+        dialog = ProjectSettingsDialog(self)
+        if dialog.exec_() == QDialog.Accepted:
+            new_settings = dialog.get_settings()
+            self.fixed_project_name = new_settings['project_name']
+            self.auto_select_project = new_settings['auto_select']
+            self.show_project_selector = new_settings['show_selector']
+            
+            # Update UI
+            self.shotgrid_project_label.setText(self.fixed_project_name)
+            
+            # Save settings
+            config.set('shotgrid', 'default_project', self.fixed_project_name)
+            config.set('shotgrid', 'auto_select_project', str(self.auto_select_project))
+            config.set('shotgrid', 'show_project_selector', str(self.show_project_selector))
+            
+            QMessageBox.information(self, "설정 저장", "프로젝트 설정이 저장되었습니다.")
+            
+            if self.auto_select_project:
+                self.auto_load_fixed_project()
+
     @pyqtSlot(str)
     def processing_error(self, error_message):
-        logger.error(f"File processing error: {error_message}")
+        """ processing_thread에서 에러 발생 시 호출될 슬롯 """
+        logger.error(f"An error occurred in processing thread: {error_message}")
+        QMessageBox.critical(self, "처리 오류", f"파일 처리 중 오류가 발생했습니다:\n{error_message}")
+        
+        # UI 상태 복원
         self.progress_bar.setVisible(False)
-        self.process_btn.setText("처리 시작")
         self.process_btn.setEnabled(True)
-        try:
-            self.process_btn.clicked.disconnect()
-        except TypeError:
-            pass
-        self.process_btn.clicked.connect(self.process_files)
-        self.scan_btn.setEnabled(True)
-        QMessageBox.critical(self, "처리 오류", error_message)
+        self.process_btn.setText("처리 시작")
 
     def closeEvent(self, event):
         if self.processing_thread and self.processing_thread.isRunning():
-            self.processing_thread.cancel = True
-            self.processing_thread.wait()
-        event.accept()
+            reply = QMessageBox.question(self, '확인',
+                                         '파일 처리 작업이 아직 진행 중입니다. 종료하시겠습니까?',
+                                         QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if reply == QMessageBox.Yes:
+                self.processing_thread.stop()
+                event.accept()
+            else:
+                event.ignore()
+        else:
+            event.accept()
 
     def _get_skip_reason_display(self, reason_code):
         reasons = {
-            "processed": "이미 처리됨",
-            "unsupported": "지원하지 않는 확장자",
-            "temp_file": "임시 파일",
-            "small_file": "너무 작은 파일",
-            "no_media_stream": "미디어 스트림 없음"
+            "ALREADY_PROCESSED": ("이미 처리됨", "#5D6D7E"),
+            "UNSUPPORTED_TYPE": ("미지원 형식", "#F39C12"),
+            "DUPLICATE_FILE": ("중복 파일", "#A569BD"),
+            "EMPTY_FILE": ("빈 파일", "#E67E22"),
+            "READ_ERROR": ("읽기 오류", "#E74C3C"),
+            "UNKNOWN": ("알 수 없음", "#95A5A6")
         }
-        return reasons.get(reason_code, "알 수 없는 이유") 
+        return reasons.get(reason_code, ("기타", "#BDC3C7"))

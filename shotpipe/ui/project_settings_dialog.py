@@ -26,7 +26,6 @@ class ProjectSettingsDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("프로젝트 설정")
-        self.setFixedSize(450, 350)
         
         # Shotgrid 연동 관련 초기화
         self.shotgrid_connector = None
@@ -75,15 +74,20 @@ class ProjectSettingsDialog(QDialog):
         self.connection_status_label = QLabel("확인 중...")
         status_layout.addWidget(self.connection_status_label)
         
+        # 버튼들을 담을 QHBoxLayout 생성
+        button_layout = QHBoxLayout()
+
         # 연결 테스트 버튼
         self.test_connection_btn = QPushButton("연결 테스트")
         self.test_connection_btn.clicked.connect(self._test_connection)
-        status_layout.addWidget(self.test_connection_btn)
+        button_layout.addWidget(self.test_connection_btn)
         
         # 프로젝트 새로고침 버튼
-        self.refresh_projects_btn = QPushButton("프로젝트 목록 새로고침")
+        self.refresh_projects_btn = QPushButton("목록 새로고침")
         self.refresh_projects_btn.clicked.connect(self._load_projects)
-        status_layout.addWidget(self.refresh_projects_btn)
+        button_layout.addWidget(self.refresh_projects_btn)
+
+        status_layout.addLayout(button_layout)
         
         status_group.setLayout(status_layout)
         layout.addWidget(status_group)
@@ -107,73 +111,67 @@ class ProjectSettingsDialog(QDialog):
         """현재 설정값들을 UI에 로드합니다."""
         try:
             # 현재 고정 프로젝트
-            default_project = config.get("shotgrid", "default_project") or "AXRD-296"
+            default_project = config.get("shotgrid", "default_project")
             
             # 자동 선택 옵션
-            auto_select = config.get("shotgrid", "auto_select_project")
-            if auto_select is not None:
-                self.auto_select_cb.setChecked(auto_select)
-            else:
-                self.auto_select_cb.setChecked(True)
+            auto_select_str = config.get("shotgrid", "auto_select_project")
+            auto_select = auto_select_str.lower() == 'true' if isinstance(auto_select_str, str) else True
+
+            self.auto_select_cb.setChecked(auto_select)
             
             # 프로젝트 선택기 표시 옵션
-            show_selector = config.get("shotgrid", "show_project_selector")
-            if show_selector is not None:
-                self.show_selector_cb.setChecked(show_selector)
-            else:
-                self.show_selector_cb.setChecked(False)
+            show_selector_str = config.get("shotgrid", "show_project_selector")
+            show_selector = show_selector_str.lower() == 'true' if isinstance(show_selector_str, str) else False
+            self.show_selector_cb.setChecked(show_selector)
             
             logger.debug(f"현재 설정 로드됨: project={default_project}, auto_select={auto_select}, show_selector={show_selector}")
             
+            # 콤보박스에 현재 프로젝트 설정 (프로젝트 목록 로드 전이라도)
+            if default_project:
+                self.current_project_combo.setCurrentText(default_project)
+
         except Exception as e:
             logger.error(f"설정 로드 중 오류: {e}")
+            # 기본값 설정
+            self.auto_select_cb.setChecked(True)
+            self.show_selector_cb.setChecked(False)
     
     def _load_projects(self):
         """Shotgrid에서 프로젝트 목록을 로드합니다."""
         if not SHOTGRID_AVAILABLE or not self.shotgrid_entity_manager:
             self.current_project_combo.clear()
-            self.current_project_combo.addItem("AXRD-296")
-            self.current_project_combo.setCurrentText("AXRD-296")
+            self.current_project_combo.addItem("ShotGrid 연결 안됨")
             return
         
         try:
             # 연결 상태 확인
-            if not self.shotgrid_connector.is_connected():
+            if not self.shotgrid_connector or not self.shotgrid_connector.is_connected():
                 self.current_project_combo.clear()
-                self.current_project_combo.addItem("AXRD-296")
-                self.current_project_combo.setCurrentText("AXRD-296")
+                self.current_project_combo.addItem("ShotGrid 연결 안됨")
                 return
             
             # 프로젝트 목록 가져오기
             self.projects = self.shotgrid_entity_manager.get_projects()
             
             # 콤보박스 업데이트
-            current_text = self.current_project_combo.currentText()
+            current_text = config.get("shotgrid", "default_project") or ""
             self.current_project_combo.clear()
             
-            for project in self.projects:
-                self.current_project_combo.addItem(project["name"])
+            project_names = [p['name'] for p in self.projects]
+            self.current_project_combo.addItems(project_names)
             
             # 기존 선택값 복원
-            if current_text:
-                index = self.current_project_combo.findText(current_text)
-                if index >= 0:
-                    self.current_project_combo.setCurrentIndex(index)
-                else:
-                    self.current_project_combo.setCurrentText(current_text)
-            else:
-                # 현재 설정에서 기본 프로젝트 설정
-                default_project = config.get("shotgrid", "default_project") or "AXRD-296"
-                self.current_project_combo.setCurrentText(default_project)
+            if current_text in project_names:
+                self.current_project_combo.setCurrentText(current_text)
+            elif project_names:
+                 self.current_project_combo.setCurrentIndex(0)
             
             logger.info(f"Shotgrid에서 {len(self.projects)}개 프로젝트 로드됨")
             
         except Exception as e:
             logger.error(f"프로젝트 목록 로드 중 오류: {e}")
-            # 오류 발생 시 기본값 설정
             self.current_project_combo.clear()
-            self.current_project_combo.addItem("AXRD-296")
-            self.current_project_combo.setCurrentText("AXRD-296")
+            self.current_project_combo.addItem("목록 로드 실패")
     
     def _update_connection_status(self):
         """연결 상태를 업데이트합니다."""
@@ -238,24 +236,31 @@ class ProjectSettingsDialog(QDialog):
             show_selector = self.show_selector_cb.isChecked()
             
             # 입력 검증
-            if not project_name:
-                QMessageBox.warning(self, "경고", "프로젝트 이름을 입력해주세요.")
+            if not project_name or "연결" in project_name or "실패" in project_name:
+                QMessageBox.warning(self, "경고", "유효한 프로젝트를 선택해주세요.")
                 return
             
             # 설정 저장
             config.set("shotgrid", "default_project", project_name)
-            config.set("shotgrid", "auto_select_project", auto_select)
-            config.set("shotgrid", "show_project_selector", show_selector)
+            config.set("shotgrid", "auto_select_project", str(auto_select))
+            config.set("shotgrid", "show_project_selector", str(show_selector))
             
             logger.info(f"프로젝트 설정 저장됨: {project_name}, auto_select={auto_select}, show_selector={show_selector}")
-            
-            QMessageBox.information(self, "설정 저장", "프로젝트 설정이 저장되었습니다.\n변경사항을 적용하려면 애플리케이션을 재시작해주세요.")
+            QMessageBox.information(self, "저장됨", "설정이 적용되었습니다.")
             
         except Exception as e:
             logger.error(f"설정 저장 중 오류: {e}")
             QMessageBox.critical(self, "오류", f"설정 저장 중 오류가 발생했습니다:\n{str(e)}")
     
     def accept(self):
-        """다이얼로그 확인 버튼 클릭 시 설정을 저장합니다."""
+        """OK 버튼 클릭 시 설정 저장 후 대화상자 닫기."""
         self._apply_settings()
         super().accept()
+
+    def get_settings(self):
+        """현재 UI에 설정된 값들을 반환합니다."""
+        return {
+            "project_name": self.current_project_combo.currentText(),
+            "auto_select": self.auto_select_cb.isChecked(),
+            "show_selector": self.show_selector_cb.isChecked()
+        }

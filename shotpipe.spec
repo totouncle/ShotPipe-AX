@@ -9,32 +9,29 @@ block_cipher = None
 # 현재 디렉토리
 current_dir = os.path.dirname(os.path.abspath('main.py'))
 
-# 데이터 파일들 수집
+# 데이터 파일들 수집 - 최적화된 버전
 datas = [
     # ShotPipe 모듈 전체
     ('shotpipe', 'shotpipe'),
-    # 문서 파일들 (존재하는 경우만)
 ]
 
-# 문서 파일들 조건부 추가
-doc_files = [
-    'ShotPipe - AI 생성 파일 자동화 Shotgrid 업로드 솔루션 PRD.md',
-    'AI 서비스 태스크 매핑 표.md',
+# 필수 문서 파일들만 포함 (용량 최적화)
+essential_docs = [
     'WINDOWS_USER_GUIDE.md',
     'README.md'
 ]
 
-for doc_file in doc_files:
+for doc_file in essential_docs:
     if os.path.exists(doc_file):
         datas.append((doc_file, '.'))
 
-# Vendor 폴더 (있는 경우)
+# Vendor 폴더 - ExifTool만 포함 (용량 최적화)
 if os.path.exists('vendor'):
     datas.append(('vendor', 'vendor'))
 
-# .env 파일 (있는 경우)
-if os.path.exists('.env'):
-    datas.append(('.env', '.'))
+# .env 예제 파일 포함
+if os.path.exists('.env.example'):
+    datas.append(('.env.example', '.'))
 
 a = Analysis(
     ['main.py'],
@@ -85,7 +82,7 @@ a = Analysis(
     hooksconfig={},
     runtime_hooks=[],
     excludes=[
-        # 불필요한 패키지들 제외
+        # 불필요한 패키지들 제외 - 대폭 확장
         'matplotlib',
         'numpy',
         'pandas',
@@ -106,6 +103,42 @@ a = Analysis(
         'tests',
         'setuptools',
         'pkg_resources',
+        # 추가 불필요 패키지들
+        'sqlite3',
+        'email',
+        'html',
+        'http',
+        'urllib3',
+        'curses',
+        'distutils',
+        'multiprocessing',
+        'concurrent',
+        'asyncio',
+        'queue',
+        'socket',
+        'ssl',
+        'webbrowser',
+        'doctest',
+        'pydoc',
+        'xmlrpc',
+        'xml.dom',
+        'xml.sax',
+        'lib2to3',
+        # PyQt5 불필요 모듈들
+        'PyQt5.QtNetwork',
+        'PyQt5.QtWebEngine',
+        'PyQt5.QtWebEngineWidgets',
+        'PyQt5.QtSql',
+        'PyQt5.QtTest',
+        'PyQt5.QtMultimedia',
+        'PyQt5.QtOpenGL',
+        'PyQt5.QtPositioning',
+        'PyQt5.QtQml',
+        'PyQt5.QtQuick',
+        'PyQt5.QtSensors',
+        'PyQt5.QtSerialPort',
+        'PyQt5.QtXml',
+        'PyQt5.QtXmlPatterns',
     ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
@@ -113,9 +146,13 @@ a = Analysis(
     noarchive=False,
 )
 
-# 불필요한 파일들 제거
+# 용량 최적화를 위한 바이너리 필터링
 a.binaries = [x for x in a.binaries if not x[0].startswith('tcl')]
 a.binaries = [x for x in a.binaries if not x[0].startswith('tk')]
+a.binaries = [x for x in a.binaries if not x[0].startswith('Qt5Network')]
+a.binaries = [x for x in a.binaries if not x[0].startswith('Qt5WebEngine')]
+a.binaries = [x for x in a.binaries if not x[0].startswith('Qt5Multimedia')]
+a.binaries = [x for x in a.binaries if not x[0].startswith('Qt5OpenGL')]
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
@@ -129,9 +166,17 @@ exe = EXE(
     name='ShotPipe',
     debug=False,
     bootloader_ignore_signals=False,
-    strip=False,
-    upx=True,
-    upx_exclude=[],
+    strip=True,  # 최적화를 위해 strip 활성화
+    upx=True,    # UPX 압축 활성화
+    upx_exclude=[
+        # UPX 압축에서 제외할 중요한 파일들
+        'vcruntime140.dll',
+        'python38.dll',
+        'python39.dll',
+        'python310.dll',
+        'python311.dll',
+        'python312.dll',
+    ],
     runtime_tmpdir=None,
     console=False,  # GUI 앱이므로 콘솔 창 숨김
     disable_windowed_traceback=False,
@@ -143,4 +188,7 @@ exe = EXE(
     
     # 버전 정보
     version='version_info.txt' if os.path.exists('version_info.txt') else None,
+    
+    # 추가 최적화 옵션
+    manifest='ShotPipe.manifest' if os.path.exists('ShotPipe.manifest') else None,
 )

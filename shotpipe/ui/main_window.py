@@ -11,7 +11,7 @@ from PyQt5.QtWidgets import (
     QWidget, QStatusBar, QMenuBar, QMenu, QAction, QMessageBox,
     QTextEdit, QSplitter, QLabel, QDockWidget
 )
-from PyQt5.QtCore import Qt, QSettings, QEvent, pyqtSlot, QThread, pyqtSignal
+from PyQt5.QtCore import Qt, QSettings, QEvent, pyqtSlot, QThread, pyqtSignal, QTimer
 from PyQt5.QtGui import QIcon, QColor
 from shotpipe.config import config
 from shotpipe.utils.log_handler import QTextEditLogger
@@ -21,6 +21,7 @@ from shotpipe.ui.shotgrid_tab import ShotgridTab
 from shotpipe.ui.about_dialog import AboutDialog
 from shotpipe.ui.manual_dialog import ManualDialog
 from shotpipe.ui.project_settings_dialog import ProjectSettingsDialog
+from shotpipe.ui.welcome_wizard import show_welcome_wizard
 from shotpipe.shotgrid.sg_compat import Shotgun, SG_API_SCRIPT, SG_API_KEY, SG_URL
 from shotpipe.file_processor.processor import FileProcessor
 from shotpipe.file_processor.task_assigner import TaskAssigner
@@ -40,21 +41,26 @@ class QTextEditLogger(logging.Handler):
     def emit(self, record):
         msg = self.format(record)
         
-        # Add color for different log levels
+        # 이모지와 색상을 사용한 로그 레벨 구분
         if record.levelno >= logging.ERROR:
-            msg = f'<span style="color: #FF6B68;">{msg}</span>'
+            msg = f'<span style="color: #FF4444; font-weight: bold;">❌ {msg}</span>'
         elif record.levelno >= logging.WARNING:
-            msg = f'<span style="color: #FFCC00;">{msg}</span>'
+            msg = f'<span style="color: #FFB347; font-weight: bold;">⚠️ {msg}</span>'
         elif record.levelno >= logging.INFO:
-            msg = f'<span style="color: #7CE8E6;">{msg}</span>'
+            # 진행 상황 관련 로그는 더 눈에 띄게
+            if any(keyword in msg for keyword in ['🚀', '📋', '📁', '✅', '🎉', '⏳']):
+                msg = f'<span style="color: #00FF88; font-weight: bold;">{msg}</span>'
+            else:
+                msg = f'<span style="color: #7CE8E6;">{msg}</span>'
         elif record.levelno >= logging.DEBUG:
             msg = f'<span style="color: #9B9B9B;">{msg}</span>'
         
         self.text_edit.append(msg)
-        # 스크롤을 항상 최신 로그로 이동
-        self.text_edit.verticalScrollBar().setValue(
-            self.text_edit.verticalScrollBar().maximum()
-        )
+        # 스크롤을 항상 최신 로그로 이동 (개선된 방식)
+        scrollbar = self.text_edit.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum())
+        # 스크롤이 제대로 작동하도록 약간의 딩레이 추가
+        self.text_edit.ensureCursorVisible()
 
 class ErrorDialog(QMessageBox):
     """Custom error dialog with more detailed information."""
@@ -71,9 +77,12 @@ class ErrorDialog(QMessageBox):
 class MainWindow(QMainWindow):
     """Main application window for ShotPipe."""
     
-    def __init__(self):
+    def __init__(self, processed_files_tracker):
         """Initialize the main window."""
         super().__init__()
+        
+        # 주입받은 트래커 인스턴스를 저장합니다.
+        self.processed_files_tracker = processed_files_tracker
         
         try:
             # Load window settings
@@ -140,21 +149,13 @@ class MainWindow(QMainWindow):
             # Create layout
             layout = QVBoxLayout(central_widget)
             
-            # Create shared ProcessedFilesTracker instance
-            self.processed_files_tracker = ProcessedFilesTracker()
-            
             # Create tab widget
             self.tab_widget = QTabWidget()
             layout.addWidget(self.tab_widget)
             
-            # Create tabs and pass shared tracker
-            self.file_tab = FileTab(self)
+            # Create tabs and pass the single shared tracker instance
+            self.file_tab = FileTab(self.processed_files_tracker, self)
             self.shotgrid_tab = ShotgridTab()
-            
-            # Set the shared tracker for the application
-            self.app = QApplication.instance()
-            if self.app:
-                self.app.processed_files_tracker = self.processed_files_tracker
             
             # Add tabs to tab widget
             self.tab_widget.addTab(self.file_tab, "파일 처리")
@@ -175,6 +176,23 @@ class MainWindow(QMainWindow):
         except Exception as e:
             logger.critical(f"Error initializing UI: {e}", exc_info=True)
             self._show_error_dialog("UI Initialization Error", f"Failed to initialize UI: {str(e)}")
+    
+    def show(self):
+        """윈도우 표시 시 첫 실행 마법사 체크"""
+        super().show()
+        
+        # 첫 실행 시 환영 마법사 표시
+        QTimer.singleShot(500, self._check_and_show_wizard)
+    
+    def _check_and_show_wizard(self):
+        """환영 마법사 표시 여부 체크 및 표시"""
+        try:
+            if show_welcome_wizard(self):
+                logger.info("환영 마법사 완료")
+                # 마법사 완료 후 추가 작업이 있다면 여기서 수행
+        except Exception as e:
+            logger.warning(f"환영 마법사 오류: {e}")
+            # 오류가 있어도 메인 프로그램은 계속 실행
         
     def _create_menu_bar(self):
         """Creates the main menu bar for the application."""
@@ -313,9 +331,19 @@ class MainWindow(QMainWindow):
         try:
             log_text_edit = QTextEdit()
             log_text_edit.setReadOnly(True)
-            log_text_edit.setFixedHeight(150)  # 로그 창 높이 제한
-            # 인라인 스타일 제거 - 전체 다크 테마 스타일시트 사용
-            log_text_edit.setAcceptRichText(True)  # Enable rich text for color formatting
+            log_text_edit.setFixedHeight(180)  # 로그 창 높이 약간 증가
+            log_text_edit.setAcceptRichText(True)  # 리치 텍스트 활성화
+            # 로그 창 전용 스타일 적용
+            log_text_edit.setStyleSheet("""
+                QTextEdit {
+                    font-family: 'Consolas', 'Monaco', monospace;
+                    font-size: 11px;
+                    line-height: 1.2;
+                    border: 1px solid #404040;
+                    border-radius: 4px;
+                    padding: 8px;
+                }
+            """)
             
             # 로그 핸들러 추가
             log_handler = QTextEditLogger(log_text_edit)
@@ -325,17 +353,19 @@ class MainWindow(QMainWindow):
             root_logger = logging.getLogger()
             root_logger.addHandler(log_handler)
             
-            # 초기 메시지 추가
+            # 초기 메시지 추가 (개선된 형식)
             current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            log_text_edit.append(f"{current_time} - INFO - ShotPipe 로그 창이 초기화되었습니다.")
+            welcome_msg = f'<span style="color: #00FF88; font-weight: bold;">🚀 {current_time} - ShotPipe 로그 시스템 초기화 완료</span>'
+            log_text_edit.append(welcome_msg)
             
             return log_text_edit
         except Exception as e:
             logger.critical(f"Failed to create log widget: {e}", exc_info=True)
-            # Fall back to a simple text edit if creation fails
+            # 로그 위젯 생성 실패 시 대체 위젯
             fallback = QTextEdit()
             fallback.setReadOnly(True)
-            fallback.append("Error creating log widget. See system logs for details.")
+            fallback.setStyleSheet("color: #FF4444; font-weight: bold;")
+            fallback.append("❌ 로그 위젯 생성 실패. 시스템 로그를 확인하세요.")
             return fallback
     
     def _show_error_dialog(self, title, message, details=None):

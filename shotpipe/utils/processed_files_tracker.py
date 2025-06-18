@@ -13,6 +13,9 @@ import shutil
 from pathlib import Path
 import csv
 
+# QMessageBox를 임포트합니다.
+from PyQt5.QtWidgets import QMessageBox
+
 # Import the new hash utility
 from .hash_utils import get_file_hash
 
@@ -173,8 +176,8 @@ class ProcessedFilesTracker:
         last_batch = self.history["batch_info"]["last_batch"]
         next_batch = last_batch + 1
         
-        # 현재 날짜 가져오기
-        current_date = datetime.datetime.now().strftime("%Y%m%d")
+        # 현재 날짜 가져오기 (더 읽기 쉬운 형식)
+        current_date = datetime.datetime.now().strftime("%Y-%m-%d")
         
         # 새 배치 이름 생성 (batch_YYYYMMDD_##)
         batch_name = f"batch_{current_date}_{next_batch:02d}"
@@ -407,7 +410,9 @@ class ProcessedFilesTracker:
     def export_history(self, export_path=None):
         """이력 데이터를 CSV 파일로 내보내기"""
         if not export_path:
-            export_path = os.path.join(os.path.dirname(self.history_file), "processed_files_export.csv")
+            # 더 명확하고 읽기 쉬운 파일명 생성
+            timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            export_path = os.path.join(os.path.dirname(self.history_file), f"shotpipe_history_{timestamp}.csv")
             
         try:
             with open(export_path, 'w', newline='', encoding='utf-8') as f:
@@ -474,29 +479,55 @@ class ProcessedFilesTracker:
         logger.info(f"{removed_count}개의 오래된 이력 항목이 제거되었습니다.")
 
     def reset_history(self):
-        """이력 초기화"""
+        """모든 처리 이력을 초기화합니다."""
         try:
-            self.history = {"processed_files": {}}
+            # 1. 메모리 내 이력 초기화
+            self.history = {
+                "processed_files": {},
+                "batch_info": {
+                    "last_batch": 0,
+                    "current_batch": "batch01"
+                }
+            }
+            
+            # 2. 해시 룩업 테이블 초기화
             self._hash_lookup = {}
+            
+            # 3. 파일에 변경사항 저장 (초기화된 내용으로 덮어쓰기)
             self._save_history()
-            # 물리적 파일도 삭제
+            
+            # 4. (선택사항) 물리적인 json 파일 삭제
             if os.path.exists(self.history_file):
                 os.remove(self.history_file)
-            logger.info("처리 이력이 성공적으로 초기화되었습니다.")
-            return True
+                logger.info(f"이력 파일 삭제됨: {self.history_file}")
+
+            logger.info("모든 처리 이력이 성공적으로 초기화되었습니다.")
+            
         except Exception as e:
             logger.error(f"처리 이력 초기화 중 오류 발생: {e}", exc_info=True)
-            return False
+
+    def show_stats_popup(self):
+        """처리 이력 통계를 MessageBox로 표시합니다."""
+        try:
+            stats = self.get_history_stats()
+            if not stats:
+                QMessageBox.information(None, "이력 통계", "처리 이력이 없습니다.")
+                return
+
+            stats_str = "처리 이력 통계:\n\n"
+            for key, value in stats.items():
+                # 보기 좋게 키 이름을 변환합니다.
+                display_key = key.replace("_", " ").title()
+                stats_str += f"- {display_key}: {value}\n"
+            
+            QMessageBox.information(None, "이력 통계", stats_str)
+
+        except Exception as e:
+            logger.error(f"통계 표시 중 오류 발생: {e}", exc_info=True)
+            QMessageBox.warning(None, "오류", f"통계를 표시하는 중 오류가 발생했습니다: {str(e)}")
 
     def export_history_to_csv(self, output_path):
-        """Export processed files history to a CSV file.
-        
-        Args:
-            output_path (str): The path where the CSV file will be saved
-            
-        Returns:
-            str: The path to the saved CSV file or None if failed
-        """
+        """이력을 CSV 파일로 내보냅니다."""
         try:
             with open(output_path, 'w', newline='', encoding='utf-8') as csvfile:
                 writer = csv.writer(csvfile)

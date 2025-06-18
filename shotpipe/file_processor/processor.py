@@ -270,28 +270,41 @@ class ProcessingThread(QThread):
         
     def run(self):
         """Run the file processing task."""
-        logger.info("ProcessingThread.run: Entered the run method.")
+        logger.info("🚀 파일 처리 작업 시작")
         try:
             total_files = len(self.file_infos)
             if total_files == 0:
-                logger.warning("ProcessingThread.run: No files to process, exiting run method.")
+                logger.warning("⚠️ 처리할 파일이 없습니다")
                 self.processing_completed.emit([])
                 return
 
             processed_files_list = []
-            logger.info(f"ProcessingThread.run: Starting to loop through {total_files} files.")
+            logger.info(f"📋 총 {total_files}개 파일 처리 시작")
             
             for i, file_info in enumerate(self.file_infos):
                 if self._is_cancelled:
-                    logger.info("File processing was cancelled.")
+                    logger.info("⏹️ 파일 처리가 취소되었습니다")
                     break
+                
+                current_file = file_info.get('file_name', f'파일 {i+1}')
+                logger.info(f"📁 [{i+1}/{total_files}] {current_file} 처리 중...")
                 
                 try:
                     start_time = time.time()
                     
-                    # 파일 정보를 기반으로 시퀀스 및 샷 결정
-                    sequence, shot = self._determine_sequence_and_shot(file_info['file_name'], file_info['file_path'])
+                    # 사용자가 테이블에서 설정한 시퀀스와 샷 정보 우선 사용
+                    sequence = file_info.get('sequence', '')
+                    shot = file_info.get('shot', '')
                     
+                    # 시퀀스나 샷이 비어있으면 자동 결정
+                    if not sequence or not shot:
+                        auto_sequence, auto_shot = self._determine_sequence_and_shot(file_info['file_name'], file_info['file_path'])
+                        if not sequence:
+                            sequence = auto_sequence
+                        if not shot:
+                            shot = auto_shot
+                    
+                    # 선택된 시퀀스가 있으면 우선 적용 (전체 배치 처리용)
                     if self.selected_sequence:
                         sequence = self.selected_sequence
                         
@@ -304,11 +317,19 @@ class ProcessingThread(QThread):
                     status = "성공" if processed_info.get("success") else "실패"
                     message = processed_info.get("message", "")
                     
-                    self.file_processed.emit(file_info['file_name'], status, sequence, shot, message, elapsed_time)
+                    # 시그널 emit 전에 타입 확인 및 변환
+                    sequence_str = str(sequence) if sequence else ""
+                    shot_str = str(shot) if shot else ""
+                    self.file_processed.emit(file_info['file_name'], status, sequence_str, shot_str, message, elapsed_time)
+                    
+                    if status == "완료":
+                        logger.info(f"✅ {file_info['file_name']} 처리 완료 ({elapsed_time:.1f}초)")
+                    else:
+                        logger.warning(f"⚠️ {file_info['file_name']} 처리 중 문제 발생: {message}")
                 
                 except Exception as e:
                     file_name = file_info.get('file_name', 'Unknown') if isinstance(file_info, dict) else file_info
-                    logger.error(f"Error processing file {file_name}: {e}", exc_info=True)
+                    logger.error(f"❌ {file_name} 처리 실패: {e}")
                     error_info = {
                         "file_name": file_name,
                         "file_path": file_info.get('file_path', 'Unknown') if isinstance(file_info, dict) else file_info,
@@ -318,12 +339,15 @@ class ProcessingThread(QThread):
                     processed_files_list.append(error_info)
                     self.file_processed.emit(file_name, "실패", "", "", str(e), 0)
 
-                # Update progress
-                self.progress_updated.emit(int(((i + 1) / total_files) * 100))
+                # Update progress (파일 번호로 전송)
+                self.progress_updated.emit(i + 1)
+                progress_percent = int((i + 1) / total_files * 100)
+                logger.info(f"⏳ 진행률: {progress_percent}% ({i+1}/{total_files})")
             
+            logger.info(f"🎉 모든 파일 처리 완료! 총 {len(processed_files_list)}개 파일 처리됨")
             self.processing_completed.emit(processed_files_list)
         except Exception as e:
-            logger.critical(f"An unexpected error occurred in the processing thread: {e}", exc_info=True)
+            logger.critical(f"💥 처리 스레드에서 예상치 못한 오류 발생: {e}", exc_info=True)
             self.processing_error.emit(str(e))
     
     def _process_file(self, file_info, sequence=None, shot=None):

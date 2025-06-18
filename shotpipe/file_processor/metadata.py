@@ -77,9 +77,12 @@ class MetadataExtractor:
         try:
             if hasattr(exiftool, 'ExifToolHelper'):
                 self.exiftool = exiftool.ExifToolHelper(executable=EXIFTOOL_PATH)
-                # A simple command to verify it's working
-                self.exiftool.execute("-ver") 
-                logger.info("ExifTool initialized successfully using ExifToolHelper.")
+                # Test with a simple command to verify it's working
+                try:
+                    version_result = self.exiftool.execute("-ver")
+                    logger.info(f"ExifTool initialized successfully using ExifToolHelper (version: {version_result[0] if version_result else 'unknown'}).")
+                except Exception as test_e:
+                    logger.warning(f"ExifToolHelper created but test failed: {test_e}")
                 return True
         except Exception as e:
             logger.warning(f"Failed to initialize ExifToolHelper, will try legacy interface. Error: {e}")

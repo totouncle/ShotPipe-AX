@@ -178,13 +178,15 @@ def main():
             logger.info(f"처리된 파일 추적기 초기화: {processed_count}개 파일, 현재 배치: {current_batch}, 마지막 배치 번호: {last_batch}")
         except Exception as e:
             logger.error(f"처리된 파일 추적기 초기화 중 오류 발생: {e}")
+            tracker = None # 초기화 실패 시 None으로 설정
         
         app = QApplication(sys.argv)
         
         # 다크 테마 적용
         apply_dark_theme(app)
         
-        window = MainWindow()
+        # MainWindow에 tracker 인스턴스 전달
+        window = MainWindow(tracker)
         window.show()
         logger.info("Application started")
         return app.exec_()

@@ -1485,11 +1485,14 @@ class FileTab(QWidget):
             self.processed_files_tracker = ProcessedFilesTracker()
             logger.debug("export_history에서 ProcessedFilesTracker 인스턴스 새로 생성")
             
-        # 저장할 파일 위치 선택
+        # 저장할 파일 위치 선택 (더 명확한 기본 파일명)
+        import datetime
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M")
+        default_filename = f"shotpipe_history_{timestamp}.csv"
         file_path, _ = QFileDialog.getSaveFileName(
             self,
             "이력 내보내기",
-            os.path.expanduser("~") + "/shotpipe_history.csv",
+            os.path.expanduser("~") + "/" + default_filename,
             "CSV 파일 (*.csv)"
         )
         

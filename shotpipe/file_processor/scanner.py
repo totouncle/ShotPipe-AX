@@ -24,6 +24,14 @@ class FileScanner:
         self._skipped_files = []  # 스킵된 파일 목록 추적용 속성 추가
         self.processed_files_tracker = None  # ProcessedFilesTracker 인스턴스 추가
     
+    def reset(self):
+        """스캐너의 내부 상태를 초기화합니다."""
+        logger.info("FileScanner 상태를 초기화합니다.")
+        self._scanned_files = []
+        self._skipped_files = []
+        # processed_files_tracker는 외부에서 관리되므로 여기서는 리셋하지 않습니다.
+        # reset_history 호출 시 외부에서 tracker 인스턴스 자체가 리셋됩니다.
+    
     def scan_directory(self, directory_path, recursive=True, exclude_processed=True):
         """
         Scan a directory for media files.
@@ -48,11 +56,6 @@ class FileScanner:
         files = []
         self._skipped_files = []  # 스킵된 파일 목록 초기화
         
-        # Initialize ProcessedFilesTracker if needed
-        if exclude_processed and self.processed_files_tracker is None:
-            self.processed_files_tracker = ProcessedFilesTracker()
-            logger.info("초기화된 처리된 파일 추적기 사용")
-        
         # Define walk function based on recursion setting
         if recursive:
             logger.debug(f"Using recursive search (rglob) for {directory_path}")
@@ -69,55 +72,74 @@ class FileScanner:
         
         # Filter and process files
         for item in items:
-            if item.is_file():
-                total_checked += 1
-                
-                # 지원되는 확장자인지 확인
-                if item.suffix.lower() in self.supported_extensions:
-                    supported_found += 1
+            try:
+                if item.is_file():
+                    total_checked += 1
                     
-                    # Skip files that match the processed file pattern if exclude_processed is True
-                    if exclude_processed:
-                        is_processed = False
+                    # 지원되는 확장자인지 확인
+                    if item.suffix.lower() in self.supported_extensions:
+                        supported_found += 1
                         
-                        # 우선 ProcessedFilesTracker로 확인 (가장 정확한 방법)
-                        if self.processed_files_tracker and self.processed_files_tracker.is_file_processed(str(item)):
-                            is_processed = True
-                            logger.debug(f"ProcessedFilesTracker에서 처리된 파일로 확인됨: {item.name}")
-                        # 패턴 매칭과 기타 방법으로 백업 검사
-                        elif self._is_processed_file(item):
-                            is_processed = True
-                            logger.debug(f"패턴 매칭으로 처리된 파일로 확인됨: {item.name}")
+                        # Skip files that match the processed file pattern if exclude_processed is True
+                        if exclude_processed:
+                            is_processed = False
                             
-                        if is_processed:
-                            processed_skipped += 1
-                            logger.debug(f"Skipping already processed file: {item.name}")
-                            # 스킵된 파일 정보 저장
+                            try:
+                                # 우선 ProcessedFilesTracker로 확인 (가장 정확한 방법)
+                                if self.processed_files_tracker and self.processed_files_tracker.is_file_processed(str(item)):
+                                    is_processed = True
+                                    logger.debug(f"ProcessedFilesTracker에서 처리된 파일로 확인됨: {item.name}")
+                                # 패턴 매칭과 기타 방법으로 백업 검사
+                                elif self._is_processed_file(item):
+                                    is_processed = True
+                                    logger.debug(f"패턴 매칭으로 처리된 파일로 확인됨: {item.name}")
+                            except Exception as e:
+                                logger.warning(f"처리된 파일 확인 중 오류 발생: {item.name} - {e}")
+                                is_processed = False
+                                
+                            if is_processed:
+                                processed_skipped += 1
+                                logger.debug(f"Skipping already processed file: {item.name}")
+                                # 스킵된 파일 정보 저장
+                                try:
+                                    self._skipped_files.append({
+                                        "file_path": str(item.absolute()),
+                                        "file_name": item.name,
+                                        "file_extension": item.suffix.lower(),
+                                        "file_size": item.stat().st_size,
+                                        "file_type": self._determine_file_type(item),
+                                        "skip_reason": "already_processed"
+                                    })
+                                except Exception as e:
+                                    logger.warning(f"스킵된 파일 정보 저장 중 오류: {item.name} - {e}")
+                                continue
+                        
+                        try:
+                            file_info = self._create_file_info(item)
+                            files.append(file_info)
+                        except Exception as e:
+                            logger.error(f"파일 정보 생성 중 오류: {item.name} - {e}")
+                            continue
+                    else:
+                        unsupported_skipped += 1
+                        # 지원되지 않는 파일 유형 추적
+                        try:
                             self._skipped_files.append({
                                 "file_path": str(item.absolute()),
                                 "file_name": item.name,
                                 "file_extension": item.suffix.lower(),
                                 "file_size": item.stat().st_size,
-                                "file_type": self._determine_file_type(item),
-                                "skip_reason": "already_processed"
+                                "file_type": "unsupported",
+                                "skip_reason": "unsupported_extension"
                             })
-                            continue
-                    
-                    file_info = self._create_file_info(item)
-                    files.append(file_info)
-                else:
-                    unsupported_skipped += 1
-                    # 지원되지 않는 파일 유형 추적
-                    self._skipped_files.append({
-                        "file_path": str(item.absolute()),
-                        "file_name": item.name,
-                        "file_extension": item.suffix.lower(),
-                        "file_size": item.stat().st_size,
-                        "file_type": "unsupported",
-                        "skip_reason": "unsupported_extension"
-                    })
-                    if total_checked < 10 or total_checked % 100 == 0:  # 로그 과다 방지
-                        logger.debug(f"Skipping unsupported file type: {item.name} (확장자: {item.suffix})")
+                        except Exception as e:
+                            logger.warning(f"지원되지 않는 파일 정보 저장 중 오류: {item.name} - {e}")
+                        
+                        if total_checked < 10 or total_checked % 100 == 0:  # 로그 과다 방지
+                            logger.debug(f"Skipping unsupported file type: {item.name} (확장자: {item.suffix})")
+            except Exception as e:
+                logger.error(f"파일 처리 중 예외 발생: {item} - {e}")
+                continue
         
         # 스캔된 파일 목록 저장
         self._scanned_files = files
