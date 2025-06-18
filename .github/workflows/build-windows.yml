@@ -73,22 +73,14 @@ jobs:
         }
         
         Write-Host "`nTesting Python imports..." -ForegroundColor Yellow
-        python -c @"
-import sys
-print(f'Python version: {sys.version}')
-
-# Test critical imports
-modules = ['PyQt5', 'PyQt5.QtWidgets', 'yaml', 'PIL', 'dotenv', 'shotgun_api3']
-for module in modules:
-    try:
-        __import__(module)
-        print(f'[OK] {module}')
-    except ImportError as e:
-        print(f'[ERROR] {module}: {e}')
-        sys.exit(1)
-        
-print('[INFO] All imports successful!')
-"@
+        python -c "import sys; print(f'Python version: {sys.version}')"
+        python -c "import PyQt5; print('[OK] PyQt5')"
+        python -c "import PyQt5.QtWidgets; print('[OK] PyQt5.QtWidgets')"
+        python -c "import yaml; print('[OK] yaml')"
+        python -c "import PIL; print('[OK] PIL')"
+        python -c "import dotenv; print('[OK] dotenv')"
+        python -c "import shotgun_api3; print('[OK] shotgun_api3')"
+        Write-Host "[INFO] All imports successful!" -ForegroundColor Green
         
     - name: 🏗️ NSIS 설치
       run: |
