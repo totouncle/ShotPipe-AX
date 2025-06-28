@@ -21,7 +21,7 @@ jobs:
         python-version: '3.12'
         
     - name: 💾 Cache Dependencies
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: ~\AppData\Local\pip\Cache
         key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
@@ -73,7 +73,7 @@ jobs:
         }
         
     - name: 📤 Upload Standalone Executable
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: ShotPipe-Windows-Standalone
         path: |
@@ -84,7 +84,7 @@ jobs:
         retention-days: 30
         
     - name: 📤 Upload NSIS Installer
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: ShotPipe-Windows-Installer
         path: |
