@@ -23,7 +23,7 @@
 
 ; 기본 설정
 Name "${PRODUCT_NAME} ${PRODUCT_VERSION}"
-OutFile "ShotPipe_Setup.exe"
+OutFile "ShotPipe_v${PRODUCT_VERSION}_Setup.exe"
 InstallDir "$PROGRAMFILES64\ShotPipe"
 InstallDirRegKey HKLM "${PRODUCT_DIR_REGKEY}" ""
 ShowInstDetails show

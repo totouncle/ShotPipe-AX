@@ -26,6 +26,7 @@ from ..config import config
 from ..file_processor.metadata import MetadataExtractor
 from ..utils.processed_files_tracker import ProcessedFilesTracker
 from ..ui.styles.dark_theme import get_color_palette
+from .file_tab_ui import FileTabUI
 
 logger = logging.getLogger(__name__)
 
@@ -278,7 +279,20 @@ class FileTab(QWidget):
                 self.shotgrid_connector = None
                 self.shotgrid_entity_manager = None
         
-        self._init_ui()
+        # UI 컴포넌트 초기화
+        self.ui = FileTabUI(self)
+        self.ui.setup_ui()
+        
+        # 델리게이트 설정
+        self.cell_editor_delegate = CellEditorDelegate(self)
+        self.file_table.setItemDelegate(self.cell_editor_delegate)
+        
+        # Shotgrid 초기화 (UI 생성 후)
+        if SHOTGRID_AVAILABLE and self.shotgrid_connector:
+            self.update_shotgrid_status()
+            if self.auto_select_project:
+                from PyQt5.QtCore import QTimer
+                QTimer.singleShot(1000, self.auto_load_fixed_project)
         
         # 시퀀스 콤보박스 초기화
         self.initialize_sequence_combo()
@@ -291,374 +305,6 @@ class FileTab(QWidget):
         
         # 앱 시작 시 마지막으로 사용한 디렉토리가 있는지 확인하고 자동으로 로드
         self.load_last_directory()
-    
-    def _init_ui(self):
-        """Initialize the UI."""
-        try:
-            # Main layout
-            main_layout = QVBoxLayout()
-            
-            # Directory selection
-            dir_layout = QHBoxLayout()
-            dir_label = QLabel("소스 디렉토리:")
-            self.source_edit = QLineEdit()
-            self.source_edit.setReadOnly(True)
-            self.source_edit.setPlaceholderText("선택된 디렉토리 없음")
-            self.source_edit.setStyleSheet("font-weight: bold;")
-            
-            self.select_dir_btn = QPushButton("디렉토리 선택...")
-            self.select_dir_btn.clicked.connect(self.select_source_directory)
-            
-            dir_layout.addWidget(dir_label)
-            dir_layout.addWidget(self.source_edit, 1)
-            dir_layout.addWidget(self.select_dir_btn)
-            
-            main_layout.addLayout(dir_layout)
-            
-            # Output directory selection
-            output_layout = QHBoxLayout()
-            output_label = QLabel("출력 폴더:")
-            self.output_edit = QLineEdit()
-            self.output_edit.setReadOnly(True)
-            self.output_edit.setPlaceholderText("소스 디렉토리와 동일")
-            self.output_edit.setStyleSheet("font-style: italic;")
-            
-            self.select_output_btn = QPushButton("출력 폴더 선택...")
-            self.select_output_btn.clicked.connect(self.select_output_directory)
-            
-            # 'processed' 폴더 생성 옵션 체크박스
-            self.create_processed_folder_cb = QCheckBox("processed 폴더 생성")
-            self.create_processed_folder_cb.setChecked(True)
-            
-            output_layout.addWidget(output_label)
-            output_layout.addWidget(self.output_edit, 1)
-            output_layout.addWidget(self.select_output_btn)
-            output_layout.addWidget(self.create_processed_folder_cb)
-            
-            main_layout.addLayout(output_layout)
-            
-            # Options group
-            options_group = QGroupBox("옵션")
-            options_inner_layout = QVBoxLayout()
-            
-            # Recursive option
-            recursive_layout = QHBoxLayout()
-            self.recursive_cb = QCheckBox("하위 폴더 포함")
-            self.recursive_cb.setChecked(False)
-            
-            # Exclude processed files option
-            self.exclude_processed_cb = QCheckBox("이미 처리된 파일 제외")
-            self.exclude_processed_cb.setChecked(True)
-            
-            recursive_layout.addWidget(self.recursive_cb)
-            recursive_layout.addWidget(self.exclude_processed_cb)
-            recursive_layout.addStretch()
-            
-            options_inner_layout.addLayout(recursive_layout)
-            
-            # Sequence options
-            sequence_layout = QHBoxLayout()
-            self.use_sequence_cb = QCheckBox("시퀀스 설정:")
-            self.use_sequence_cb.setChecked(True)
-            self.use_sequence_cb.stateChanged.connect(self.toggle_sequence_combo)
-            
-            sequence_label = QLabel("시퀀스:")
-            
-            self.sequence_combo = QComboBox()
-            self.sequence_combo.setEditable(True)
-            self.sequence_combo.setInsertPolicy(QComboBox.InsertAtBottom)
-            self.sequence_combo.currentTextChanged.connect(self.on_sequence_changed)
-            
-            self.save_sequence_btn = QPushButton("저장")
-            self.save_sequence_btn.clicked.connect(self.add_custom_sequence)
-            self.save_sequence_btn.setMaximumWidth(60)
-            
-            sequence_layout.addWidget(self.use_sequence_cb)
-            sequence_layout.addWidget(sequence_label)
-            sequence_layout.addWidget(self.sequence_combo)
-            sequence_layout.addWidget(self.save_sequence_btn)
-            sequence_layout.addStretch()
-            
-            options_inner_layout.addLayout(sequence_layout)
-            options_group.setLayout(options_inner_layout)
-            main_layout.addWidget(options_group)
-            
-            # Shotgrid 연동 그룹 추가
-            if SHOTGRID_AVAILABLE and self.shotgrid_connector:
-                shotgrid_group = QGroupBox("Shotgrid 연동")
-                shotgrid_layout = QVBoxLayout()
-                
-                # 연결 상태 및 프로젝트 정보
-                status_layout = QHBoxLayout()
-                self.shotgrid_status_label = QLabel("연결 상태: 확인 중...")
-                status_layout.addWidget(self.shotgrid_status_label)
-                
-                # 고정 프로젝트 정보 표시
-                project_info_layout = QHBoxLayout()
-                project_info_layout.addWidget(QLabel("고정 프로젝트:"))
-                self.shotgrid_project_label = QLabel(self.fixed_project_name)
-                self.shotgrid_project_label.setStyleSheet("""
-                    QLabel {
-                        font-weight: bold;
-                        color: #2ECC71;
-                        background-color: #34495E;
-                        padding: 5px 10px;
-                        border-radius: 3px;
-                        border: 1px solid #2ECC71;
-                    }
-                """)
-                project_info_layout.addWidget(self.shotgrid_project_label)
-                
-                self.refresh_shotgrid_btn = QPushButton("시퀀스/샷 새로고침")
-                self.refresh_shotgrid_btn.clicked.connect(self.refresh_shotgrid_data)
-                self.refresh_shotgrid_btn.setStyleSheet("""
-                    QPushButton {
-                        background-color: #3498DB;
-                        color: white;
-                        font-weight: bold;
-                        padding: 5px 15px;
-                        border-radius: 3px;
-                    }
-                    QPushButton:hover {
-                        background-color: #2980B9;
-                    }
-                """)
-                project_info_layout.addWidget(self.refresh_shotgrid_btn)
-                
-                # 프로젝트 설정 버튼 추가
-                self.project_settings_btn = QPushButton("프로젝트 설정")
-                self.project_settings_btn.clicked.connect(self.open_project_settings)
-                self.project_settings_btn.setStyleSheet("""
-                    QPushButton {
-                        background-color: #8E44AD;
-                        color: white;
-                        font-weight: bold;
-                        padding: 5px 15px;
-                        border-radius: 3px;
-                    }
-                    QPushButton:hover {
-                        background-color: #7D3C98;
-                    }
-                """)
-                project_info_layout.addWidget(self.project_settings_btn)
-                project_info_layout.addStretch()
-                
-                # 시퀀스/Shot 선택 (프로젝트는 숨김)
-                selection_layout = QHBoxLayout()
-                
-                selection_layout.addWidget(QLabel("시퀀스:"))
-                self.shotgrid_sequence_combo = QComboBox()
-                self.shotgrid_sequence_combo.setMinimumWidth(200)
-                self.shotgrid_sequence_combo.setStyleSheet("""
-                    QComboBox {
-                        padding: 8px;
-                        font-size: 12px;
-                        border: 2px solid #3498DB;
-                        border-radius: 5px;
-                    }
-                    QComboBox:focus {
-                        border: 2px solid #2ECC71;
-                    }
-                """)
-                self.shotgrid_sequence_combo.currentTextChanged.connect(self.on_fixed_project_sequence_changed)
-                selection_layout.addWidget(self.shotgrid_sequence_combo)
-                
-                selection_layout.addWidget(QLabel("Shot:"))
-                self.shotgrid_shot_combo = QComboBox()
-                self.shotgrid_shot_combo.setMinimumWidth(150)
-                self.shotgrid_shot_combo.setEditable(True)
-                self.shotgrid_shot_combo.setStyleSheet("""
-                    QComboBox {
-                        padding: 8px;
-                        font-size: 12px;
-                        border: 2px solid #3498DB;
-                        border-radius: 5px;
-                    }
-                    QComboBox:focus {
-                        border: 2px solid #2ECC71;
-                    }
-                """)
-                selection_layout.addWidget(self.shotgrid_shot_combo)
-                
-                self.apply_shotgrid_btn = QPushButton("선택된 파일에 일괄 적용")
-                self.apply_shotgrid_btn.clicked.connect(self.apply_shotgrid_to_selected)
-                self.apply_shotgrid_btn.setStyleSheet("""
-                    QPushButton {
-                        background-color: #2ECC71;
-                        color: white;
-                        font-weight: bold;
-                        padding: 10px 20px;
-                        border-radius: 5px;
-                    }
-                    QPushButton:hover {
-                        background-color: #27AE60;
-                    }
-                """)
-                selection_layout.addWidget(self.apply_shotgrid_btn)
-                selection_layout.addStretch()
-                
-                shotgrid_layout.addLayout(status_layout)
-                shotgrid_layout.addLayout(project_info_layout)
-                shotgrid_layout.addLayout(selection_layout)
-                shotgrid_group.setLayout(shotgrid_layout)
-                main_layout.addWidget(shotgrid_group)
-                
-                # 초기 연결 상태 확인 및 고정 프로젝트 로드
-                self.update_shotgrid_status()
-                if self.auto_select_project:
-                    QTimer.singleShot(1000, self.auto_load_fixed_project)
-            else:
-                logger.info("Shotgrid 연동 UI 비활성화")
-            
-            # Files table
-            table_header_layout = QHBoxLayout()
-            table_header_layout.addWidget(QLabel("파일 목록:"))
-            
-            # 검색 기능 추가
-            search_layout = QHBoxLayout()
-            search_label = QLabel("검색:")
-            self.search_edit = QLineEdit()
-            self.search_edit.setPlaceholderText("파일명 검색...")
-            self.search_edit.setClearButtonEnabled(True)
-            self.search_edit.textChanged.connect(self.filter_files)
-            
-            # 필터 옵션
-            filter_label = QLabel("필터:")
-            self.filter_combo = QComboBox()
-            self.filter_combo.addItem("모든 파일", "all")
-            self.filter_combo.addItem("처리된 파일만", "processed")
-            self.filter_combo.addItem("미처리 파일만", "unprocessed")
-            self.filter_combo.currentIndexChanged.connect(self.filter_files)
-            
-            # 이력 관리 버튼
-            self.export_history_btn = QPushButton("이력 내보내기")
-            self.export_history_btn.clicked.connect(self.export_history)
-            
-            # 이력 통계 버튼
-            self.show_stats_btn = QPushButton("이력 통계")
-            self.show_stats_btn.clicked.connect(self.show_history_stats)
-            
-            # 이력 초기화 버튼 추가
-            self.reset_history_btn = QPushButton("이력 초기화")
-            self.reset_history_btn.clicked.connect(self.reset_history)
-            
-            search_layout.addWidget(search_label)
-            search_layout.addWidget(self.search_edit, 1)
-            search_layout.addWidget(filter_label)
-            search_layout.addWidget(self.filter_combo)
-            search_layout.addWidget(self.export_history_btn)
-            search_layout.addWidget(self.show_stats_btn)
-            search_layout.addWidget(self.reset_history_btn)
-            
-            table_header_layout.addLayout(search_layout)
-            main_layout.addLayout(table_header_layout)
-            
-            # 파일 정보 표시 영역 추가
-            self.file_info_label = QLabel("파일 스캔 결과: 준비 중...")
-            main_layout.addWidget(self.file_info_label)
-            
-            # 편집 가이드 라벨 추가
-            edit_guide_label = QLabel("🎯 팁: 시퀀스* 및 샷* 컬럼을 더블클릭하면 Shotgrid 데이터에서 선택할 수 있습니다!")
-            edit_guide_label.setStyleSheet("color: #3498DB; font-style: italic; padding: 5px;")
-            main_layout.addWidget(edit_guide_label)
-            
-            # 파일 보기 모드 라디오 버튼
-            view_mode_layout = QHBoxLayout()
-            view_mode_label = QLabel("보기 모드:")
-            
-            self.tab_radio_group = QButtonGroup(self)
-            self.all_files_radio = QRadioButton("모든 파일")
-            self.valid_files_radio = QRadioButton("유효 파일")
-            self.skipped_files_radio = QRadioButton("스킵된 파일")
-            
-            self.tab_radio_group.addButton(self.all_files_radio)
-            self.tab_radio_group.addButton(self.valid_files_radio)
-            self.tab_radio_group.addButton(self.skipped_files_radio)
-            
-            self.valid_files_radio.setChecked(True)
-            
-            view_mode_layout.addWidget(view_mode_label)
-            view_mode_layout.addWidget(self.all_files_radio)
-            view_mode_layout.addWidget(self.valid_files_radio)
-            view_mode_layout.addWidget(self.skipped_files_radio)
-            view_mode_layout.addStretch()
-            
-            self.all_files_radio.toggled.connect(self._update_file_display)
-            self.valid_files_radio.toggled.connect(self._update_file_display)
-            self.skipped_files_radio.toggled.connect(self._update_file_display)
-            
-            main_layout.addLayout(view_mode_layout)
-            
-            self.file_table = QTableWidget(0, 7)
-            self.file_table.setHorizontalHeaderLabels(["", "파일명", "상태", "시퀀스*", "샷*", "경과 시간", "메세지"])
-            
-            self.file_table.setAlternatingRowColors(True)
-            self.file_table.setSelectionBehavior(QTableWidget.SelectRows)
-            
-            self.file_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Fixed)
-            self.file_table.setColumnWidth(0, 40)
-            self.file_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Interactive)
-            self.file_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
-            self.file_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Interactive)
-            self.file_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Interactive)
-            self.file_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeToContents)
-            self.file_table.horizontalHeader().setSectionResizeMode(6, QHeaderView.Interactive)
-
-            self.file_table.setColumnWidth(1, 350)
-            self.file_table.setColumnWidth(3, 100)
-            self.file_table.setColumnWidth(4, 120)
-            self.file_table.setColumnWidth(6, 300)
-
-            header = self.file_table.horizontalHeader()
-            header.setToolTip("시퀀스*와 샷* 컬럼을 더블클릭하면 Shotgrid에서 선택할 수 있습니다")
-            header.setContextMenuPolicy(Qt.CustomContextMenu)
-            header.customContextMenuRequested.connect(self._show_header_context_menu)
-            
-            self.file_table.setSortingEnabled(True)
-            self.file_table.horizontalHeader().setSortIndicatorShown(True)
-            self.file_table.sortItems(2, Qt.AscendingOrder)
-            self.file_table.itemChanged.connect(self._on_table_item_changed)
-            
-            self.cell_editor_delegate = CellEditorDelegate(self)
-            self.file_table.setItemDelegate(self.cell_editor_delegate)
-            
-            self.file_table.setSelectionBehavior(QTableWidget.SelectRows)
-            self.file_table.setEditTriggers(QAbstractItemView.DoubleClicked)
-            main_layout.addWidget(self.file_table)
-            
-            self.progress_bar = QProgressBar()
-            self.progress_bar.setRange(0, 100)
-            self.progress_bar.setValue(0)
-            self.progress_bar.setTextVisible(True)
-            self.progress_bar.setFormat("%p% (%v/%m)")
-            self.progress_bar.setVisible(False)
-            main_layout.addWidget(self.progress_bar)
-            
-            btn_layout = QHBoxLayout()
-            
-            self.scan_btn = QPushButton("파일 스캔")
-            self.scan_btn.clicked.connect(self.scan_files)
-            
-            self.process_btn = QPushButton("처리 시작")
-            self.process_btn.clicked.connect(self.process_files)
-            self.process_btn.setEnabled(False)
-            
-            self.new_batch_btn = QPushButton("새 배치 시작")
-            self.new_batch_btn.clicked.connect(self.start_new_batch)
-            self.new_batch_btn.setEnabled(True)
-            
-            btn_layout.addWidget(self.scan_btn)
-            btn_layout.addWidget(self.process_btn)
-            btn_layout.addWidget(self.new_batch_btn)
-            btn_layout.addStretch()
-            
-            main_layout.addLayout(btn_layout)
-            
-            self.setLayout(main_layout)
-        
-        except Exception as e:
-            logger.critical(f"Failed to initialize file tab UI: {e}", exc_info=True)
-            QMessageBox.critical(self, "오류", f"UI 초기화 중 오류가 발생했습니다: {str(e)}")
     
     def initialize_sequence_combo(self):
         self.sequence_combo.clear()
@@ -1054,7 +700,7 @@ class FileTab(QWidget):
                 self.file_table.setItem(row, 6, QTableWidgetItem(message))
                 
                 # 상태에 따라 행 스타일 적용
-                self._style_table_row(row, is_processed, status_text)
+                self.ui.style_table_row(row, is_processed, status_text)
 
         except Exception as e:
             logger.error(f"Failed to update file display: {e}", exc_info=True)
@@ -1063,38 +709,6 @@ class FileTab(QWidget):
             self.file_table.setSortingEnabled(True)
             self._update_file_info_label()
 
-    def _style_table_row(self, row, is_processed, status_text):
-        if is_processed:
-            color = QColor("#5A5A5A")  # Dark gray for processed files
-            font = self.file_table.item(row, 1).font()
-            font.setItalic(True)
-            for col in range(1, self.file_table.columnCount()):
-                item = self.file_table.item(row, col)
-                if item:
-                    item.setForeground(QColor("gray"))
-                    item.setFont(font)
-        elif "스킵" in status_text:
-            reason = self.file_info_dict.get(self.file_table.item(row, 1).text(), {}).get("skip_reason")
-            display_text, color_name = self._get_skip_reason_display(reason)
-            color = QColor(color_name)
-            for col in range(1, self.file_table.columnCount()):
-                item = self.file_table.item(row, col)
-                if item:
-                    item.setBackground(color)
-                    item.setToolTip(f"스킵된 이유: {display_text}")
-            status_item = self.file_table.item(row, 2)
-            if status_item:
-                status_item.setText(f"스킵됨 ({display_text})")
-        else:
-            for col in range(1, self.file_table.columnCount()):
-                item = self.file_table.item(row, col)
-                if item:
-                    item.setBackground(QColor("transparent"))
-                    item.setForeground(QColor(get_color_palette()['text_primary']))
-                    font = item.font()
-                    font.setItalic(False)
-                    item.setFont(font)
-                    item.setToolTip("")
 
     def process_files(self):
         try:
@@ -1155,7 +769,7 @@ class FileTab(QWidget):
                 self.file_table.setItem(row, 5, QTableWidgetItem(f"{elapsed_time:.2f}s"))
                 self.file_table.setItem(row, 6, QTableWidgetItem(message))
                 is_processed = "완료" in status or "성공" in status
-                self._style_table_row(row, is_processed, status)
+                self.ui.style_table_row(row, is_processed, status)
                 if is_processed:
                     full_path = self.file_info_dict.get(file_name, {}).get("file_path", "")
                     if full_path:

@@ -1,228 +1,113 @@
-name: 🚀 Windows 배포 빌드
+name: 🚀 Build Windows Distribution
 
 on:
-  # 수동 실행 가능
-  workflow_dispatch:
-    inputs:
-      version:
-        description: '버전 번호 (예: v1.3.0)'
-        required: false
-        default: 'v1.3.0'
-  
-  # 메인 브랜치에 푸시할 때 자동 실행
   push:
-    branches: [ main ]
-    paths:
-      - 'shotpipe/**'
-      - 'main.py'
-      - 'requirements.txt'
-      - 'shotpipe.spec'
-      - 'ShotPipe_Installer.nsi'
-      - '.github/workflows/build-windows.yml'
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:  # 수동 실행 가능
 
 jobs:
   build-windows:
-    name: 🖥️ Windows 인스톨러 빌드
     runs-on: windows-latest
     
     steps:
-    - name: 📁 소스코드 체크아웃
+    - name: 📥 Checkout Repository
       uses: actions/checkout@v4
       
-    - name: 🐍 Python 설정
-      uses: actions/setup-python@v5
+    - name: 🐍 Set up Python
+      uses: actions/setup-python@v4
       with:
-        python-version: '3.11'
-        cache: 'pip'
+        python-version: '3.12'
         
-    - name: 📦 의존성 캐시
-      uses: actions/cache@v4
+    - name: 💾 Cache Dependencies
+      uses: actions/cache@v3
       with:
-        path: ~/.cache/pip
+        path: ~\AppData\Local\pip\Cache
         key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
         restore-keys: |
           ${{ runner.os }}-pip-
-        
-    - name: 🔧 Python 의존성 설치
-      shell: pwsh
+          
+    - name: 📦 Install Dependencies
       run: |
-        Write-Host "Upgrading pip and essential tools..." -ForegroundColor Yellow
-        python -m pip install --upgrade pip setuptools wheel
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pyinstaller
         
-        Write-Host "`nInstalling requirements..." -ForegroundColor Yellow
-        pip install -r requirements.txt --verbose
+    - name: 🏗️ Build Executable with PyInstaller
+      run: |
+        pyinstaller --onefile --windowed --name ShotPipe main.py --add-data "shotpipe;shotpipe" --add-data "vendor;vendor"
         
-        Write-Host "`nInstalling PyInstaller..." -ForegroundColor Yellow
-        pip install pyinstaller[encryption]
-        
-        Write-Host "`nVerifying critical installations..." -ForegroundColor Yellow
-        $criticalPackages = @("pyqt5", "pyinstaller", "shotgun-api3", "pyyaml", "pillow")
-        foreach ($package in $criticalPackages) {
-            try {
-                $result = pip show $package 2>$null
-                if ($result) {
-                    Write-Host "✅ $package installed" -ForegroundColor Green
-                } else {
-                    Write-Host "❌ $package missing" -ForegroundColor Red
-                    throw "$package not found"
-                }
-            } catch {
-                Write-Host "❌ Error checking $package : $_" -ForegroundColor Red
-                exit 1
-            }
+    - name: 📋 Verify Build
+      run: |
+        dir dist
+        if (Test-Path "dist/ShotPipe.exe") {
+          Write-Host "✅ ShotPipe.exe generated successfully"
+          $size = (Get-Item "dist/ShotPipe.exe").Length / 1MB
+          Write-Host "📏 File size: $([math]::Round($size, 2)) MB"
+        } else {
+          Write-Host "❌ ShotPipe.exe not found"
+          exit 1
         }
         
-        Write-Host "`nTesting Python imports..." -ForegroundColor Yellow
-        python -c "import sys; print(f'Python version: {sys.version}')"
-        python -c "import PyQt5; print('[OK] PyQt5')"
-        python -c "import PyQt5.QtWidgets; print('[OK] PyQt5.QtWidgets')"
-        python -c "import yaml; print('[OK] yaml')"
-        python -c "import PIL; print('[OK] PIL')"
-        python -c "import dotenv; print('[OK] dotenv')"
-        python -c "import shotgun_api3; print('[OK] shotgun_api3')"
-        Write-Host "[INFO] All imports successful!" -ForegroundColor Green
-        
-    - name: 🏗️ NSIS 설치
+    - name: 🔧 Install NSIS
       run: |
-        echo "Installing NSIS..."
         choco install nsis -y
-        echo "NSIS installed successfully"
-        makensis /VERSION
         
-    - name: 🔍 빌드 환경 검증
-      shell: pwsh
+    - name: 🎯 Build NSIS Installer
       run: |
-        Write-Host "=== Build Environment Check ===" -ForegroundColor Cyan
-        Write-Host "Current directory:"
-        Get-Location
-        Get-ChildItem -Name
+        # NSIS를 PATH에 추가
+        $env:PATH += ";C:\Program Files (x86)\NSIS"
         
-        Write-Host "`nPython version:"
-        python --version
-        
-        Write-Host "`nPyInstaller version:"
-        pyinstaller --version
-        
-        Write-Host "`nChecking required files:"
-        $files = @("main.py", "shotpipe.spec", "ShotPipe_Installer.nsi", "requirements.txt")
-        foreach ($file in $files) {
-            if (Test-Path $file) {
-                Write-Host "✅ $file found" -ForegroundColor Green
-            } else {
-                Write-Host "❌ $file missing" -ForegroundColor Red
-            }
-        }
-        
-        Write-Host "`nChecking shotpipe module:"
-        if (Test-Path "shotpipe") {
-            Write-Host "✅ shotpipe directory found" -ForegroundColor Green
-            $pyFiles = Get-ChildItem -Path "shotpipe" -Recurse -Filter "*.py" | Measure-Object
-            Write-Host "  └── Python files: $($pyFiles.Count)"
-        } else {
-            Write-Host "❌ shotpipe directory missing" -ForegroundColor Red
-        }
-        
-        Write-Host "`n=== Environment Check Complete ===" -ForegroundColor Cyan
-        
-    - name: 🚀 독립형 실행파일 빌드
-      shell: pwsh
-      run: |
-        Write-Host "🔨 PyInstaller로 실행파일 생성 중..." -ForegroundColor Yellow
-        Write-Host "Working directory: $(Get-Location)"
-        Write-Host "Starting PyInstaller build..."
-        
-        pyinstaller --clean --noconfirm shotpipe.spec
-        
-        Write-Host "`nBuild completed, checking output..."
-        if (Test-Path "dist\ShotPipe.exe") {
-            Write-Host "✅ ShotPipe.exe created successfully" -ForegroundColor Green
-            Get-Item "dist\ShotPipe.exe" | Format-List Name, Length, LastWriteTime
-        } else {
-            Write-Host "❌ ShotPipe.exe not found" -ForegroundColor Red
-            Write-Host "Listing dist directory:"
-            if (Test-Path "dist") {
-                Get-ChildItem "dist" | Format-Table Name, Length, LastWriteTime
-            } else {
-                Write-Host "dist directory does not exist"
-            }
-            exit 1
-        }
-        
-    - name: 🎁 NSIS 인스톨러 빌드
-      shell: pwsh
-      run: |
-        Write-Host "📦 NSIS 인스톨러 생성 중..." -ForegroundColor Yellow
-        Write-Host "Checking NSIS installation..."
-        makensis /VERSION
-        
-        Write-Host "`nBuilding installer..."
+        # NSIS 스크립트 실행
         makensis ShotPipe_Installer.nsi
         
-        if (Test-Path "ShotPipe_Setup.exe") {
-            Write-Host "✅ Installer created successfully" -ForegroundColor Green
-            Get-Item "ShotPipe_Setup.exe" | Format-List Name, Length, LastWriteTime
+        # 결과 확인
+        if (Test-Path "ShotPipe_v1.3.0_Setup.exe") {
+          Write-Host "✅ NSIS Installer generated successfully"
+          $size = (Get-Item "ShotPipe_v1.3.0_Setup.exe").Length / 1MB
+          Write-Host "📏 Installer size: $([math]::Round($size, 2)) MB"
         } else {
-            Write-Host "❌ Installer creation failed" -ForegroundColor Red
-            exit 1
+          Write-Host "❌ NSIS Installer generation failed"
+          exit 1
         }
         
-    - name: 📦 포터블 버전 생성
-      shell: powershell
-      run: |
-        echo "📁 포터블 버전 패키징 중..."
-        Write-Host "Creating portable directory..."
-        New-Item -ItemType Directory -Force -Path "ShotPipe_Portable"
-        Write-Host "Copying files..."
-        Copy-Item "dist\ShotPipe.exe" "ShotPipe_Portable\" -Force
-        if (Test-Path "README.md") { Copy-Item "README.md" "ShotPipe_Portable\" -Force }
-        if (Test-Path "LICENSE.txt") { Copy-Item "LICENSE.txt" "ShotPipe_Portable\" -Force }
-        if (Test-Path "WINDOWS_USER_GUIDE.md") { Copy-Item "WINDOWS_USER_GUIDE.md" "ShotPipe_Portable\" -Force }
-        Write-Host "Creating zip archive..."
-        $version = "${{ github.event.inputs.version || 'v1.3.0' }}"
-        $zipName = "ShotPipe_" + $version + "_Portable.zip"
-        Compress-Archive -Path "ShotPipe_Portable" -DestinationPath $zipName -Force
-        Write-Host "Portable version created: $zipName"
-        
-    - name: 📤 빌드 결과물 업로드
-      uses: actions/upload-artifact@v4
+    - name: 📤 Upload Standalone Executable
+      uses: actions/upload-artifact@v3
       with:
-        name: ShotPipe-Windows-Build-${{ github.event.inputs.version || 'v1.3.0' }}
+        name: ShotPipe-Windows-Standalone
         path: |
-          ShotPipe_Setup.exe
-          ShotPipe_*.zip
           dist/ShotPipe.exe
+          README.md
+          LICENSE.txt
+          WINDOWS_USER_GUIDE.md
         retention-days: 30
         
-    - name: 🎉 빌드 완료 알림
-      shell: pwsh
+    - name: 📤 Upload NSIS Installer
+      uses: actions/upload-artifact@v3
+      with:
+        name: ShotPipe-Windows-Installer
+        path: |
+          ShotPipe_v1.3.0_Setup.exe
+          WINDOWS_USER_GUIDE.md
+          README.md
+        retention-days: 30
+        
+    - name: 🎉 Build Summary
       run: |
-        Write-Host "===============================================" -ForegroundColor Cyan
-        Write-Host "🎉 빌드 완료!" -ForegroundColor Green
-        Write-Host "===============================================" -ForegroundColor Cyan
-        Write-Host "생성된 파일들:"
-        
-        $files = @(
-            @{Path="ShotPipe_Setup.exe"; Description="인스톨러"},
-            @{Path="dist\ShotPipe.exe"; Description="실행파일"}
-        )
-        
-        foreach ($file in $files) {
-            if (Test-Path $file.Path) {
-                $item = Get-Item $file.Path
-                $sizeMB = [math]::Round($item.Length / 1MB, 2)
-                Write-Host "✅ $($file.Path) ($($file.Description)) - ${sizeMB}MB" -ForegroundColor Green
-            }
+        Write-Host ""
+        Write-Host "🎊 Build Completed Successfully!"
+        Write-Host "=================================="
+        Write-Host ""
+        Write-Host "📦 Generated Files:"
+        if (Test-Path "dist/ShotPipe.exe") {
+          $size = (Get-Item "dist/ShotPipe.exe").Length / 1MB
+          Write-Host "  ✅ ShotPipe.exe ($([math]::Round($size, 2)) MB)"
         }
-        
-        # 포터블 ZIP 파일 찾기
-        $zipFiles = Get-ChildItem -Filter "ShotPipe_*.zip" -ErrorAction SilentlyContinue
-        if ($zipFiles) {
-            foreach ($zip in $zipFiles) {
-                $sizeMB = [math]::Round($zip.Length / 1MB, 2)
-                Write-Host "✅ $($zip.Name) (포터블) - ${sizeMB}MB" -ForegroundColor Green
-            }
+        if (Test-Path "ShotPipe_v1.3.0_Setup.exe") {
+          $size = (Get-Item "ShotPipe_v1.3.0_Setup.exe").Length / 1MB
+          Write-Host "  ✅ ShotPipe_v1.3.0_Setup.exe ($([math]::Round($size, 2)) MB)"
         }
-        
-        Write-Host "===============================================" -ForegroundColor Cyan
-        Write-Host "다운로드: Actions → Artifacts 에서 확인" -ForegroundColor Yellow
-        Write-Host "===============================================" -ForegroundColor Cyan
+        Write-Host ""
+        Write-Host "📥 Download artifacts from the Actions tab"
+        Write-Host "🚀 Ready for Windows deployment!"
