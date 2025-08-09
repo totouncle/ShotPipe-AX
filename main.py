@@ -100,9 +100,18 @@ def check_dependencies():
             exiftool_path = str(bundled_exiftool_path)
         else:
             # If not bundled, check PATH
-            exiftool_path_which = subprocess.run(["which", "exiftool"], capture_output=True, text=True, check=False)
+            # Use 'where' on Windows, 'which' on Unix-like systems
+            if platform.system() == "Windows":
+                cmd = ["where", "exiftool"]
+            else:
+                cmd = ["which", "exiftool"]
+            
+            exiftool_path_which = subprocess.run(cmd, capture_output=True, text=True, check=False)
             if exiftool_path_which.returncode == 0:
                 exiftool_path = exiftool_path_which.stdout.strip()
+                # Windows 'where' might return multiple paths, take the first one
+                if platform.system() == "Windows" and '\n' in exiftool_path:
+                    exiftool_path = exiftool_path.split('\n')[0]
 
         if exiftool_path:
             exiftool_version = subprocess.run(

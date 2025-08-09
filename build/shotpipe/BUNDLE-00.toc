@@ -1,0 +1,3 @@
+([('ShotPipe',
+   '/Users/onset/Documents/vscode/AX_pipe/dist/ShotPipe',
+   'EXECUTABLE')],)

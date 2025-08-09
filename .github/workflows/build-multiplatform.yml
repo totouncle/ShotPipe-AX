@@ -1,0 +1,312 @@
+name: 🚀 Multi-Platform Build
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:  # Manual trigger
+    inputs:
+      version:
+        description: 'Version number (e.g., 1.3.0)'
+        required: false
+        default: '1.3.0'
+
+jobs:
+  # ============================================================================
+  # Windows Build
+  # ============================================================================
+  build-windows:
+    name: 🪟 Windows Build
+    runs-on: windows-latest
+    
+    steps:
+    - name: 📥 Checkout Repository
+      uses: actions/checkout@v4
+      
+    - name: 🐍 Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.12'
+        
+    - name: 💾 Cache Dependencies
+      uses: actions/cache@v4
+      with:
+        path: ~\AppData\Local\pip\Cache
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+          
+    - name: 📦 Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pyinstaller
+        
+    - name: 📷 Download ExifTool
+      run: |
+        New-Item -ItemType Directory -Force -Path vendor
+        Invoke-WebRequest -Uri "https://exiftool.org/exiftool-12.70.zip" -OutFile "exiftool.zip"
+        Expand-Archive -Path "exiftool.zip" -DestinationPath "vendor" -Force
+        Move-Item "vendor/exiftool(-k).exe" "vendor/exiftool.exe" -Force
+        Remove-Item "exiftool.zip"
+        
+    - name: 🏗️ Build Executable
+      run: |
+        pyinstaller shotpipe.spec --clean --noconfirm
+        
+    - name: 📋 Verify Build
+      run: |
+        if (Test-Path "dist/ShotPipe.exe") {
+          Write-Host "✅ ShotPipe.exe generated successfully"
+          $size = (Get-Item "dist/ShotPipe.exe").Length / 1MB
+          Write-Host "📏 File size: $([math]::Round($size, 2)) MB"
+        } else {
+          Write-Host "❌ Build failed: ShotPipe.exe not found"
+          exit 1
+        }
+        
+    - name: 📤 Upload Windows Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ShotPipe-Windows-${{ github.sha }}
+        path: |
+          dist/ShotPipe.exe
+          README.md
+          LICENSE.txt
+          WINDOWS_USER_GUIDE.md
+        retention-days: 30
+
+  # ============================================================================
+  # macOS Intel Build
+  # ============================================================================
+  build-macos-intel:
+    name: 🍎 macOS Intel Build
+    runs-on: macos-12  # Intel-based runner
+    
+    steps:
+    - name: 📥 Checkout Repository
+      uses: actions/checkout@v4
+      
+    - name: 🐍 Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.12'
+        
+    - name: 💾 Cache Dependencies
+      uses: actions/cache@v4
+      with:
+        path: ~/Library/Caches/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+          
+    - name: 📦 Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pyinstaller
+        
+    - name: 📷 Install ExifTool
+      run: |
+        brew install exiftool
+        
+    - name: 🏗️ Build App Bundle
+      run: |
+        pyinstaller shotpipe.spec --clean --noconfirm
+        
+    - name: 📋 Verify Build
+      run: |
+        if [ -f "dist/ShotPipe.app/Contents/MacOS/ShotPipe" ]; then
+          echo "✅ ShotPipe.app generated successfully"
+          du -sh dist/ShotPipe.app
+        else
+          echo "❌ Build failed: ShotPipe.app not found"
+          exit 1
+        fi
+        
+    - name: 💿 Create DMG
+      run: |
+        # Create a simple DMG
+        mkdir dmg_temp
+        cp -R dist/ShotPipe.app dmg_temp/
+        ln -s /Applications dmg_temp/Applications
+        hdiutil create -volname "ShotPipe" -srcfolder dmg_temp -ov -format UDZO ShotPipe_macOS_Intel.dmg
+        rm -rf dmg_temp
+        
+    - name: 📤 Upload macOS Intel Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ShotPipe-macOS-Intel-${{ github.sha }}
+        path: |
+          ShotPipe_macOS_Intel.dmg
+          README.md
+          LICENSE.txt
+        retention-days: 30
+
+  # ============================================================================
+  # macOS Apple Silicon Build
+  # ============================================================================
+  build-macos-arm:
+    name: 🍎 macOS Apple Silicon Build
+    runs-on: macos-14  # M1/M2 runner (when available)
+    
+    steps:
+    - name: 📥 Checkout Repository
+      uses: actions/checkout@v4
+      
+    - name: 🐍 Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.12'
+        
+    - name: 💾 Cache Dependencies
+      uses: actions/cache@v4
+      with:
+        path: ~/Library/Caches/pip
+        key: ${{ runner.os }}-arm-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-arm-pip-
+          
+    - name: 📦 Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pyinstaller
+        
+    - name: 📷 Install ExifTool
+      run: |
+        brew install exiftool
+        
+    - name: 🏗️ Build App Bundle
+      run: |
+        pyinstaller shotpipe.spec --clean --noconfirm
+        
+    - name: 📋 Verify Build
+      run: |
+        if [ -f "dist/ShotPipe.app/Contents/MacOS/ShotPipe" ]; then
+          echo "✅ ShotPipe.app generated successfully"
+          du -sh dist/ShotPipe.app
+        else
+          echo "❌ Build failed: ShotPipe.app not found"
+          exit 1
+        fi
+        
+    - name: 💿 Create DMG
+      run: |
+        # Create a simple DMG
+        mkdir dmg_temp
+        cp -R dist/ShotPipe.app dmg_temp/
+        ln -s /Applications dmg_temp/Applications
+        hdiutil create -volname "ShotPipe" -srcfolder dmg_temp -ov -format UDZO ShotPipe_macOS_AppleSilicon.dmg
+        rm -rf dmg_temp
+        
+    - name: 📤 Upload macOS ARM Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ShotPipe-macOS-AppleSilicon-${{ github.sha }}
+        path: |
+          ShotPipe_macOS_AppleSilicon.dmg
+          README.md
+          LICENSE.txt
+        retention-days: 30
+
+  # ============================================================================
+  # Linux Build (Optional)
+  # ============================================================================
+  build-linux:
+    name: 🐧 Linux Build
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 📥 Checkout Repository
+      uses: actions/checkout@v4
+      
+    - name: 🐍 Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.12'
+        
+    - name: 💾 Cache Dependencies
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+          
+    - name: 🔧 Install System Dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y python3-pyqt5 libxcb-xinerama0
+        
+    - name: 📦 Install Python Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pyinstaller
+        
+    - name: 📷 Install ExifTool
+      run: |
+        sudo apt-get install -y libimage-exiftool-perl
+        
+    - name: 🏗️ Build Executable
+      run: |
+        pyinstaller shotpipe.spec --clean --noconfirm
+        
+    - name: 📋 Verify Build
+      run: |
+        if [ -f "dist/ShotPipe" ]; then
+          echo "✅ ShotPipe generated successfully"
+          du -sh dist/ShotPipe
+        else
+          echo "❌ Build failed: ShotPipe not found"
+          exit 1
+        fi
+        
+    - name: 📦 Create AppImage (Optional)
+      run: |
+        # AppImage creation would go here
+        echo "AppImage creation not implemented yet"
+        
+    - name: 📤 Upload Linux Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ShotPipe-Linux-${{ github.sha }}
+        path: |
+          dist/ShotPipe
+          README.md
+          LICENSE.txt
+        retention-days: 30
+
+  # ============================================================================
+  # Release Creation (on tag push)
+  # ============================================================================
+  create-release:
+    name: 📦 Create Release
+    needs: [build-windows, build-macos-intel, build-macos-arm, build-linux]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    
+    steps:
+    - name: 📥 Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts
+        
+    - name: 🏷️ Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          artifacts/**/*
+        generate_release_notes: true
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        
+    - name: 🎉 Release Summary
+      run: |
+        echo "✅ Release created successfully!"
+        echo "📦 Artifacts included:"
+        ls -la artifacts/*/

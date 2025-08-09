@@ -1,26 +1,62 @@
-# 🎨 ShotPipe 아이콘 생성 가이드
+# 🎨 ShotPipe 크로스 플랫폼 아이콘 생성 가이드
 
-## 📋 아이콘 준비 방법
+## 📋 플랫폼별 아이콘 요구사항
 
-### 방법 1: 온라인 아이콘 생성기 사용 (추천)
-1. **https://favicon.io/favicon-generator/** 방문
-2. 텍스트: "SP" 또는 "📷"
-3. 배경색: #2C3E50 (다크 블루)
-4. 글자색: #ECF0F1 (라이트 그레이)
-5. 폰트: Arial Bold
-6. 다운로드 후 파일명을 `shotpipe.ico`로 변경
+### Windows (.ico)
+- 포맷: ICO
+- 크기: 16x16, 32x32, 48x48, 256x256 (멀티 해상도)
+- 파일명: `shotpipe.ico`
 
-### 방법 2: 기존 이미지 변환
-1. **https://convertio.co/png-ico/** 방문  
-2. PNG/JPG 이미지 업로드
-3. ICO로 변환
+### macOS (.icns)
+- 포맷: ICNS
+- 크기: 16x16, 32x32, 64x64, 128x128, 256x256, 512x512, 1024x1024
+- 파일명: `shotpipe.icns`
+
+### Linux (.png)
+- 포맷: PNG
+- 크기: 512x512 권장
+- 파일명: `shotpipe.png`
+
+## 🎨 아이콘 생성 방법
+
+### 방법 1: 온라인 멀티 플랫폼 생성기 (추천) 🌟
+1. **https://www.iconifier.net/** 방문
+2. 1024x1024 PNG 이미지 업로드
+3. 모든 플랫폼 아이콘 자동 생성
+4. 다운로드 후 assets 폴더에 저장
+
+### 방법 2: 전문 도구 사용
+
+#### Windows ICO 생성
+1. **https://icoconvert.com/** 방문
+2. PNG 이미지 업로드 (최소 256x256)
+3. 멀티 해상도 선택
 4. `shotpipe.ico`로 저장
 
-### 방법 3: Photoshop/GIMP 사용
-1. 256x256 픽셀 새 문서 생성
-2. 배경: 다크 블루 (#2C3E50)
-3. 텍스트 "SP" 또는 카메라 아이콘 추가
-4. ICO 플러그인으로 저장
+#### macOS ICNS 생성
+터미널에서:
+```bash
+# 1024x1024 PNG 파일이 있다고 가정
+mkdir shotpipe.iconset
+sips -z 16 16     shotpipe_1024.png --out shotpipe.iconset/icon_16x16.png
+sips -z 32 32     shotpipe_1024.png --out shotpipe.iconset/icon_16x16@2x.png
+sips -z 32 32     shotpipe_1024.png --out shotpipe.iconset/icon_32x32.png
+sips -z 64 64     shotpipe_1024.png --out shotpipe.iconset/icon_32x32@2x.png
+sips -z 128 128   shotpipe_1024.png --out shotpipe.iconset/icon_128x128.png
+sips -z 256 256   shotpipe_1024.png --out shotpipe.iconset/icon_128x128@2x.png
+sips -z 256 256   shotpipe_1024.png --out shotpipe.iconset/icon_256x256.png
+sips -z 512 512   shotpipe_1024.png --out shotpipe.iconset/icon_256x256@2x.png
+sips -z 512 512   shotpipe_1024.png --out shotpipe.iconset/icon_512x512.png
+cp shotpipe_1024.png shotpipe.iconset/icon_512x512@2x.png
+iconutil -c icns shotpipe.iconset
+rm -rf shotpipe.iconset
+```
+
+### 방법 3: 디자인 도구 사용
+1. **Figma/Sketch/Adobe XD**에서 1024x1024 아트보드 생성
+2. 디자인 제작
+3. PNG로 내보내기
+4. 위 방법으로 변환
 
 ## 🎯 아이콘 적용 방법
 
@@ -43,8 +79,11 @@ exe = EXE(
 ## 📁 파일 위치
 ```
 AX_pipe/
-├── shotpipe.ico      # 아이콘 파일 (256x256 권장)
-├── shotpipe.spec     # 자동으로 아이콘 감지
+├── assets/
+│   ├── shotpipe.ico      # Windows 아이콘
+│   ├── shotpipe.icns     # macOS 아이콘
+│   └── shotpipe.png      # Linux 아이콘 / 원본 이미지
+├── shotpipe.spec         # 자동으로 아이콘 감지 및 적용
 └── ...
 ```
 
