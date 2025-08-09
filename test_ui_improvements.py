@@ -99,13 +99,13 @@ def test_enhanced_entity_manager():
             if len(all_available_shots) > 10:
                 print(f"... 외 {len(all_available_shots) - 10}개")
         
-        return True
+        assert True, "Enhanced entity manager test completed successfully"
         
     except Exception as e:
         print(f"❌ 테스트 중 오류 발생: {e}")
         import traceback
         traceback.print_exc()
-        return False
+        assert False, f"Test error: {e}"
 
 def test_ui_workflow_simulation():
     """UI 워크플로우 시뮬레이션 테스트"""
@@ -171,16 +171,17 @@ def test_ui_workflow_simulation():
                         print(f"   파일 '{file_info['file_name']}' → {selected_sequence_code}/{selected_shot_code}")
                     
                     print("✅ UI 워크플로우 시뮬레이션 성공!")
-                    return True
+                    assert True, "UI workflow simulation successful"
         
         print("❌ 충분한 데이터가 없어 전체 워크플로우를 완료할 수 없습니다")
-        return False
+        import pytest
+        pytest.skip("Insufficient data for complete workflow - this is expected in some environments")
         
     except Exception as e:
         print(f"❌ UI 워크플로우 시뮬레이션 중 오류: {e}")
         import traceback
         traceback.print_exc()
-        return False
+        assert False, f"UI workflow simulation error: {e}"
 
 def main():
     """메인 테스트 함수"""

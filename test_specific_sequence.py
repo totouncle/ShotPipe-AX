@@ -75,16 +75,16 @@ def test_sequence_with_shots():
                 file_info["shot"] = selected_shot_code
                 print(f"   '{file_info['file_name']}' → {sequence_code}/{selected_shot_code}")
             
-            return True
+            assert True, f"Sequence '{sequence_code}' has shots"
         else:
             print(f"❌ 시퀀스 '{sequence_code}'에 Shot이 없습니다")
-            return False
+            assert False, f"Sequence '{sequence_code}' has no shots"
             
     except Exception as e:
         print(f"❌ 테스트 중 오류: {e}")
         import traceback
         traceback.print_exc()
-        return False
+        assert False, f"Test error: {e}"
 
 def test_all_sequences():
     """모든 시퀀스를 확인해서 Shot이 있는 시퀀스 찾기"""
@@ -113,11 +113,11 @@ def test_all_sequences():
                 print(f"   {seq_code}: Shot 없음")
         
         print(f"\n결과: {len(sequences_with_shots)}개 시퀀스에 Shot이 있습니다")
-        return sequences_with_shots
+        assert len(sequences_with_shots) > 0, f"Found {len(sequences_with_shots)} sequences with shots"
         
     except Exception as e:
         print(f"❌ 시퀀스 확인 중 오류: {e}")
-        return []
+        assert False, f"Sequence check error: {e}"
 
 def main():
     """메인 테스트"""

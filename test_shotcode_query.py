@@ -38,24 +38,25 @@ def test_shotgrid_connection():
             print("❌ Shotgrid 연결 실패")
             print("   - .env 파일에 Shotgrid 연결 정보가 설정되어 있는지 확인하세요")
             print("   - SHOTGRID_URL, SHOTGRID_SCRIPT_NAME, SHOTGRID_API_KEY")
-            return False
+            assert False, "Shotgrid connection failed"
         
         print("✅ Shotgrid 연결 성공")
         
         # 연결 테스트
         if connector.test_connection():
             print("✅ Shotgrid API 테스트 성공")
-            return True
+            assert True, "Shotgrid API test successful"
         else:
             print("❌ Shotgrid API 테스트 실패")
-            return False
+            assert False, "Shotgrid API test failed"
             
     except Exception as e:
         print(f"❌ Shotgrid 연결 중 오류: {e}")
-        return False
+        assert False, f"Shotgrid connection error: {e}"
 
-def test_project_query(entity_manager):
-    """프로젝트 쿼리 테스트"""
+def test_project_query():
+    """프로젝트 쿼리 테스트 (내부에서 EntityManager 생성)"""
+    entity_manager = EntityManager()
     print("\n=== 프로젝트 쿼리 테스트 ===")
     
     try:
@@ -68,11 +69,11 @@ def test_project_query(entity_manager):
         if len(projects) > 5:
             print(f"   ... 외 {len(projects) - 5}개 프로젝트")
             
-        return projects
+        assert len(projects) > 0, f"Found {len(projects)} projects"
         
     except Exception as e:
         print(f"❌ 프로젝트 쿼리 실패: {e}")
-        return []
+        assert False, f"Project query failed: {e}"
 
 def get_shots_in_project(connector, project_id, project_name):
     """특정 프로젝트의 모든 Shot 가져오기"""

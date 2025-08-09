@@ -39,7 +39,7 @@ def test_exiftool_path(simulate_windows=False):
     
     if bundled_exiftool_path.is_file():
         print(f"  ✅ 번들된 ExifTool 발견: {bundled_exiftool_path}")
-        return str(bundled_exiftool_path)
+        assert bundled_exiftool_path.is_file(), "Bundled ExifTool found"
     else:
         print(f"  ℹ️  번들된 ExifTool 없음")
         
@@ -61,13 +61,11 @@ def test_exiftool_path(simulate_windows=False):
                 if test_platform == "Windows" and '\n' in path:
                     path = path.split('\n')[0]  # Windows where는 여러 경로 반환 가능
                 print(f"  ✅ 시스템 PATH에서 발견: {path}")
-                return path
+                assert path is not None, "ExifTool found in system PATH"
             else:
                 print("  ⚠️  시스템 PATH에서 찾을 수 없음")
-                return None
         except Exception as e:
             print(f"  ❌ 명령어 실행 실패: {e}")
-            return None
 
 # 실제 플랫폼에서 테스트
 print("\n🖥️  실제 플랫폼 동작:")
@@ -118,7 +116,7 @@ def test_path_handling():
     print(f"  os.sep: {os.sep}")
     print(f"  os.pathsep: {os.pathsep}")
     
-    return True
+    assert True, "Path handling test completed successfully"
 
 test_path_handling()
 print()

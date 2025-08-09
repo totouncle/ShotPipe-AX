@@ -60,14 +60,14 @@ def test_file_tab_improvements():
             print("1. ✅ 테이블의 시퀀스/Shot 컬럼 직접 편집 가능")
             print("2. ✅ 파일 정보 딕셔너리 실시간 업데이트")
         
-        return True
+        assert True, "File tab improvements test completed successfully"
         
     except ImportError as e:
         print(f"❌ 모듈 import 실패: {e}")
-        return False
+        assert False, f"Module import failed: {e}"
     except Exception as e:
         print(f"❌ 테스트 중 오류: {e}")
-        return False
+        assert False, f"Test error: {e}"
 
 def show_usage_guide():
     """사용 방법 가이드 표시"""
